@@ -145,7 +145,8 @@
 -export([register_callback/3]).
 -export([open/3, close/1, read/2, append/2, needs_sync/1, sync/1, position/2,
          truncate/1, current_virtual_offset/1, current_raw_offset/1, flush/1,
-         copy/3, set_maximum_since_use/1, delete/1, clear/1]).
+         copy/3, set_maximum_since_use/1, delete/1, clear/1,
+         open_with_absolute_path/3]).
 -export([obtain/0, obtain/1, release/0, release/1, transfer/1, transfer/2,
          set_limit/1, get_limit/0, info_keys/0, with_handle/1, with_handle/2,
          info/0, info/1, clear_read_cache/0]).
@@ -233,53 +234,53 @@
 %% Specs
 %%----------------------------------------------------------------------------
 
--ifdef(use_specs).
-
--type(ref() :: any()).
--type(ok_or_error() :: 'ok' | {'error', any()}).
--type(val_or_error(T) :: {'ok', T} | {'error', any()}).
--type(position() :: ('bof' | 'eof' | non_neg_integer() |
+-type ref() :: any().
+-type ok_or_error() :: 'ok' | {'error', any()}.
+-type val_or_error(T) :: {'ok', T} | {'error', any()}.
+-type position() :: ('bof' | 'eof' | non_neg_integer() |
                      {('bof' |'eof'), non_neg_integer()} |
-                     {'cur', integer()})).
--type(offset() :: non_neg_integer()).
+                     {'cur', integer()}).
+-type offset() :: non_neg_integer().
 
--spec(register_callback/3 :: (atom(), atom(), [any()]) -> 'ok').
--spec(open/3 ::
+-spec register_callback(atom(), atom(), [any()]) -> 'ok'.
+-spec open
         (file:filename(), [any()],
          [{'write_buffer', (non_neg_integer() | 'infinity' | 'unbuffered')} |
-          {'read_buffer', (non_neg_integer() | 'unbuffered')}])
-        -> val_or_error(ref())).
--spec(close/1 :: (ref()) -> ok_or_error()).
--spec(read/2 :: (ref(), non_neg_integer()) ->
-                     val_or_error([char()] | binary()) | 'eof').
--spec(append/2 :: (ref(), iodata()) -> ok_or_error()).
--spec(sync/1 :: (ref()) ->  ok_or_error()).
--spec(position/2 :: (ref(), position()) -> val_or_error(offset())).
--spec(truncate/1 :: (ref()) -> ok_or_error()).
--spec(current_virtual_offset/1 :: (ref()) -> val_or_error(offset())).
--spec(current_raw_offset/1     :: (ref()) -> val_or_error(offset())).
--spec(flush/1 :: (ref()) -> ok_or_error()).
--spec(copy/3 :: (ref(), ref(), non_neg_integer()) ->
-                     val_or_error(non_neg_integer())).
--spec(delete/1 :: (ref()) -> ok_or_error()).
--spec(clear/1 :: (ref()) -> ok_or_error()).
--spec(set_maximum_since_use/1 :: (non_neg_integer()) -> 'ok').
--spec(obtain/0 :: () -> 'ok').
--spec(obtain/1 :: (non_neg_integer()) -> 'ok').
--spec(release/0 :: () -> 'ok').
--spec(release/1 :: (non_neg_integer()) -> 'ok').
--spec(transfer/1 :: (pid()) -> 'ok').
--spec(transfer/2 :: (pid(), non_neg_integer()) -> 'ok').
--spec(with_handle/1 :: (fun(() -> A)) -> A).
--spec(with_handle/2 :: (non_neg_integer(), fun(() -> A)) -> A).
--spec(set_limit/1 :: (non_neg_integer()) -> 'ok').
--spec(get_limit/0 :: () -> non_neg_integer()).
--spec(info_keys/0 :: () -> rabbit_types:info_keys()).
--spec(info/0 :: () -> rabbit_types:infos()).
--spec(info/1 :: ([atom()]) -> rabbit_types:infos()).
--spec(ulimit/0 :: () -> 'unknown' | non_neg_integer()).
-
--endif.
+          {'read_buffer', (non_neg_integer() | 'unbuffered')}]) ->
+            val_or_error(ref()).
+-spec open_with_absolute_path
+        (file:filename(), [any()],
+         [{'write_buffer', (non_neg_integer() | 'infinity' | 'unbuffered')} |
+          {'read_buffer', (non_neg_integer() | 'unbuffered')}]) ->
+            val_or_error(ref()).
+-spec close(ref()) -> ok_or_error().
+-spec read
+        (ref(), non_neg_integer()) -> val_or_error([char()] | binary()) | 'eof'.
+-spec append(ref(), iodata()) -> ok_or_error().
+-spec sync(ref()) ->  ok_or_error().
+-spec position(ref(), position()) -> val_or_error(offset()).
+-spec truncate(ref()) -> ok_or_error().
+-spec current_virtual_offset(ref()) -> val_or_error(offset()).
+-spec current_raw_offset(ref()) -> val_or_error(offset()).
+-spec flush(ref()) -> ok_or_error().
+-spec copy(ref(), ref(), non_neg_integer()) -> val_or_error(non_neg_integer()).
+-spec delete(ref()) -> ok_or_error().
+-spec clear(ref()) -> ok_or_error().
+-spec set_maximum_since_use(non_neg_integer()) -> 'ok'.
+-spec obtain() -> 'ok'.
+-spec obtain(non_neg_integer()) -> 'ok'.
+-spec release() -> 'ok'.
+-spec release(non_neg_integer()) -> 'ok'.
+-spec transfer(pid()) -> 'ok'.
+-spec transfer(pid(), non_neg_integer()) -> 'ok'.
+-spec with_handle(fun(() -> A)) -> A.
+-spec with_handle(non_neg_integer(), fun(() -> A)) -> A.
+-spec set_limit(non_neg_integer()) -> 'ok'.
+-spec get_limit() -> non_neg_integer().
+-spec info_keys() -> rabbit_types:info_keys().
+-spec info() -> rabbit_types:infos().
+-spec info([atom()]) -> rabbit_types:infos().
+-spec ulimit() -> 'unknown' | non_neg_integer().
 
 %%----------------------------------------------------------------------------
 -define(INFO_KEYS, [total_limit, total_used, sockets_limit, sockets_used]).
@@ -300,9 +301,11 @@ register_callback(M, F, A)
     gen_server2:cast(?SERVER, {register_callback, self(), {M, F, A}}).
 
 open(Path, Mode, Options) ->
-    Path1 = filename:absname(Path),
+    open_with_absolute_path(filename:absname(Path), Mode, Options).
+
+open_with_absolute_path(Path, Mode, Options) ->
     File1 = #file { reader_count = RCount, has_writer = HasWriter } =
-        case get({Path1, fhc_file}) of
+        case get({Path, fhc_file}) of
             File = #file {} -> File;
             undefined       -> #file { reader_count = 0,
                                        has_writer = false }
@@ -311,7 +314,7 @@ open(Path, Mode, Options) ->
     IsWriter = is_writer(Mode1),
     case IsWriter andalso HasWriter of
         true  -> {error, writer_exists};
-        false -> {ok, Ref} = new_closed_handle(Path1, Mode1, Options),
+        false -> {ok, Ref} = new_closed_handle(Path, Mode1, Options),
                  case get_or_reopen([{Ref, new}]) of
                      {ok, [_Handle1]} ->
                          RCount1 = case is_reader(Mode1) of
@@ -319,7 +322,7 @@ open(Path, Mode, Options) ->
                                        false -> RCount
                                    end,
                          HasWriter1 = HasWriter orelse IsWriter,
-                         put({Path1, fhc_file},
+                         put({Path, fhc_file},
                              File1 #file { reader_count = RCount1,
                                            has_writer = HasWriter1 }),
                          {ok, Ref};
@@ -375,7 +378,7 @@ read(Ref, Count) ->
                                offset           = Offset}
                   = tune_read_buffer_limit(Handle0, Count),
               WantedCount = Count - BufRem,
-              case prim_file_read(Hdl, lists:max([BufSz, WantedCount])) of
+              case prim_file_read(Hdl, max(BufSz, WantedCount)) of
                   {ok, Data} ->
                       <<_:BufPos/binary, BufTl/binary>> = Buf,
                       ReadCount = size(Data),
@@ -537,12 +540,12 @@ clear(Ref) ->
       end).
 
 set_maximum_since_use(MaximumAge) ->
-    Now = time_compat:monotonic_time(),
+    Now = erlang:monotonic_time(),
     case lists:foldl(
            fun ({{Ref, fhc_handle},
                  Handle = #handle { hdl = Hdl, last_used_at = Then }}, Rep) ->
                    case Hdl =/= closed andalso
-                        time_compat:convert_time_unit(Now - Then,
+                        erlang:convert_time_unit(Now - Then,
                                                       native,
                                                       micro_seconds)
                           >= MaximumAge of
@@ -715,7 +718,7 @@ get_or_reopen(RefNewOrReopens) ->
             {ok, [Handle || {_Ref, Handle} <- OpenHdls]};
         {OpenHdls, ClosedHdls} ->
             Oldest = oldest(get_age_tree(),
-                            fun () -> time_compat:monotonic_time() end),
+                            fun () -> erlang:monotonic_time() end),
             case gen_server2:call(?SERVER, {open, self(), length(ClosedHdls),
                                             Oldest}, infinity) of
                 ok ->
@@ -751,7 +754,7 @@ reopen([{Ref, NewOrReopen, Handle = #handle { hdl          = closed,
            end,
     case prim_file:open(Path, Mode) of
         {ok, Hdl} ->
-            Now = time_compat:monotonic_time(),
+            Now = erlang:monotonic_time(),
             {{ok, _Offset}, Handle1} =
                 maybe_seek(Offset, reset_read_buffer(
                                      Handle#handle{hdl              = Hdl,
@@ -787,7 +790,7 @@ sort_handles([{Ref, _} | RefHdls], RefHdlsA, [{Ref, Handle} | RefHdlsB], Acc) ->
     sort_handles(RefHdls, RefHdlsA, RefHdlsB, [Handle | Acc]).
 
 put_handle(Ref, Handle = #handle { last_used_at = Then }) ->
-    Now = time_compat:monotonic_time(),
+    Now = erlang:monotonic_time(),
     age_tree_update(Then, Now, Ref),
     put({Ref, fhc_handle}, Handle #handle { last_used_at = Now }).
 
@@ -1297,11 +1300,6 @@ pending_out({N, Queue}) ->
 pending_count({Count, _Queue}) ->
     Count.
 
-pending_is_empty({0, _Queue}) ->
-    true;
-pending_is_empty({_N, _Queue}) ->
-    false.
-
 %%----------------------------------------------------------------------------
 %% server helpers
 %%----------------------------------------------------------------------------
@@ -1348,17 +1346,24 @@ process_open(State = #fhc_state { limit        = Limit,
     {Pending1, State1} = process_pending(Pending, Limit - used(State), State),
     State1 #fhc_state { open_pending = Pending1 }.
 
-process_obtain(Type, State = #fhc_state { limit        = Limit,
-                                          obtain_limit = ObtainLimit }) ->
-    ObtainCount = obtain_state(Type, count, State),
-    Pending = obtain_state(Type, pending, State),
-    Quota = case Type of
-                file   -> Limit - (used(State));
-                socket -> lists:min([ObtainLimit - ObtainCount,
-                                     Limit - (used(State))])
-            end,
+process_obtain(socket, State = #fhc_state { limit        = Limit,
+                                            obtain_limit = ObtainLimit,
+                                            open_count = OpenCount,
+                                            obtain_count_socket = ObtainCount,
+                                            obtain_pending_socket = Pending,
+                                            obtain_count_file = ObtainCountF}) ->
+    Quota = min(ObtainLimit - ObtainCount,
+                Limit - (OpenCount + ObtainCount + ObtainCountF)),
     {Pending1, State1} = process_pending(Pending, Quota, State),
-    set_obtain_state(Type, pending, Pending1, State1).
+    State1#fhc_state{obtain_pending_socket = Pending1};
+process_obtain(file, State = #fhc_state { limit        = Limit,
+                                          open_count = OpenCount,
+                                          obtain_count_socket = ObtainCountS,
+                                          obtain_count_file = ObtainCountF,
+                                          obtain_pending_file = Pending}) ->
+    Quota = Limit - (OpenCount + ObtainCountS + ObtainCountF),
+    {Pending1, State1} = process_pending(Pending, Quota, State),
+    State1#fhc_state{obtain_pending_file = Pending1}.
 
 process_pending(Pending, Quota, State) when Quota =< 0 ->
     {Pending, State};
@@ -1383,26 +1388,21 @@ run_pending_item(#pending { kind      = Kind,
     true = ets:update_element(Clients, Pid, {#cstate.blocked, false}),
     update_counts(Kind, Pid, Requested, State).
 
-update_counts(Kind, Pid, Delta,
+update_counts(open, Pid, Delta,
               State = #fhc_state { open_count          = OpenCount,
-                                   obtain_count_file   = ObtainCountF,
-                                   obtain_count_socket = ObtainCountS,
                                    clients             = Clients }) ->
-    {OpenDelta, ObtainDeltaF, ObtainDeltaS} =
-        update_counts1(Kind, Pid, Delta, Clients),
-    State #fhc_state { open_count          = OpenCount    + OpenDelta,
-                       obtain_count_file   = ObtainCountF + ObtainDeltaF,
-                       obtain_count_socket = ObtainCountS + ObtainDeltaS }.
-
-update_counts1(open, Pid, Delta, Clients) ->
     ets:update_counter(Clients, Pid, {#cstate.opened, Delta}),
-    {Delta, 0, 0};
-update_counts1({obtain, file}, Pid, Delta, Clients) ->
+    State #fhc_state { open_count = OpenCount + Delta};
+update_counts({obtain, file}, Pid, Delta,
+              State = #fhc_state {obtain_count_file   = ObtainCountF,
+                                  clients             = Clients }) ->
     ets:update_counter(Clients, Pid, {#cstate.obtained_file, Delta}),
-    {0, Delta, 0};
-update_counts1({obtain, socket}, Pid, Delta, Clients) ->
+    State #fhc_state { obtain_count_file = ObtainCountF + Delta};
+update_counts({obtain, socket}, Pid, Delta,
+              State = #fhc_state {obtain_count_socket   = ObtainCountS,
+                                  clients             = Clients }) ->
     ets:update_counter(Clients, Pid, {#cstate.obtained_socket, Delta}),
-    {0, 0, Delta}.
+    State #fhc_state { obtain_count_socket = ObtainCountS + Delta}.
 
 maybe_reduce(State) ->
     case needs_reduce(State) of
@@ -1410,18 +1410,20 @@ maybe_reduce(State) ->
         false -> State
     end.
 
-needs_reduce(State = #fhc_state { limit                 = Limit,
-                                  open_pending          = OpenPending,
-                                  obtain_limit          = ObtainLimit,
-                                  obtain_count_socket   = ObtainCountS,
-                                  obtain_pending_file   = ObtainPendingF,
-                                  obtain_pending_socket = ObtainPendingS }) ->
+needs_reduce(#fhc_state { limit                 = Limit,
+                          open_count            = OpenCount,
+                          open_pending          = {OpenPending, _},
+                          obtain_limit          = ObtainLimit,
+                          obtain_count_socket   = ObtainCountS,
+                          obtain_count_file     = ObtainCountF,
+                          obtain_pending_file   = {ObtainPendingF, _},
+                          obtain_pending_socket = {ObtainPendingS, _} }) ->
     Limit =/= infinity
-        andalso ((used(State) > Limit)
-                 orelse (not pending_is_empty(OpenPending))
-                 orelse (not pending_is_empty(ObtainPendingF))
+        andalso (((OpenCount + ObtainCountS + ObtainCountF) > Limit)
+                 orelse (OpenPending =/= 0)
+                 orelse (ObtainPendingF =/= 0)
                  orelse (ObtainCountS < ObtainLimit
-                         andalso not pending_is_empty(ObtainPendingS))).
+                         andalso (ObtainPendingS =/= 0))).
 
 reduce(State = #fhc_state { open_pending          = OpenPending,
                             obtain_pending_file   = ObtainPendingFile,
@@ -1429,14 +1431,14 @@ reduce(State = #fhc_state { open_pending          = OpenPending,
                             elders                = Elders,
                             clients               = Clients,
                             timer_ref             = TRef }) ->
-    Now = time_compat:monotonic_time(),
+    Now = erlang:monotonic_time(),
     {CStates, Sum, ClientCount} =
         ets:foldl(fun ({Pid, Eldest}, {CStatesAcc, SumAcc, CountAcc} = Accs) ->
                           [#cstate { pending_closes = PendingCloses,
                                      opened         = Opened,
                                      blocked        = Blocked } = CState] =
                               ets:lookup(Clients, Pid),
-                          TimeDiff = time_compat:convert_time_unit(
+                          TimeDiff = erlang:convert_time_unit(
                             Now - Eldest, native, micro_seconds),
                           case Blocked orelse PendingCloses =:= Opened of
                               true  -> Accs;
@@ -1475,7 +1477,7 @@ notify_age(CStates, AverageAge) ->
 notify_age0(Clients, CStates, Required) ->
     case [CState || CState <- CStates, CState#cstate.callback =/= undefined] of
         []            -> ok;
-        Notifications -> S = random:uniform(length(Notifications)),
+        Notifications -> S = rand:uniform(length(Notifications)),
                          {L1, L2} = lists:split(S, Notifications),
                          notify(Clients, Required, L2 ++ L1)
     end.

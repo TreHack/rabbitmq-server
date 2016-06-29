@@ -120,7 +120,7 @@ handle_go(Q = #amqqueue{name = QName}) ->
                    Self, {rabbit_amqqueue, set_ram_duration_target, [Self]}),
             {ok, BQ} = application:get_env(backing_queue_module),
             Q1 = Q #amqqueue { pid = QPid },
-            ok = rabbit_queue_index:erase(QName), %% For crash recovery
+            _ = BQ:delete_crashed(Q), %% For crash recovery
             BQS = bq_init(BQ, Q1, new),
             State = #state { q                   = Q1,
                              gm                  = GM,
@@ -163,9 +163,11 @@ handle_go(Q = #amqqueue{name = QName}) ->
 
 init_it(Self, GM, Node, QName) ->
     case mnesia:read({rabbit_queue, QName}) of
-        [Q = #amqqueue { pid = QPid, slave_pids = SPids, gm_pids = GMPids }] ->
+        [Q = #amqqueue { pid = QPid, slave_pids = SPids, gm_pids = GMPids,
+                         slave_pids_pending_shutdown = PSPids}] ->
             case [Pid || Pid <- [QPid | SPids], node(Pid) =:= Node] of
-                []     -> add_slave(Q, Self, GM),
+                []     -> stop_pending_slaves(QName, PSPids),
+                          add_slave(Q, Self, GM),
                           {new, QPid, GMPids};
                 [QPid] -> case rabbit_mnesia:is_process_alive(QPid) of
                               true  -> duplicate_live_master;
@@ -185,6 +187,26 @@ init_it(Self, GM, Node, QName) ->
         [] ->
             master_in_recovery
     end.
+
+%% Pending slaves have been asked to stop by the master, but despite the node
+%% being up these did not answer on the expected timeout. Stop local slaves now.
+stop_pending_slaves(QName, Pids) ->
+    [begin
+         rabbit_mirror_queue_misc:log_warning(
+           QName, "Detected stale HA slave, stopping it: ~p~n", [Pid]),
+         case erlang:process_info(Pid, dictionary) of
+             undefined -> ok;
+             {dictionary, Dict} ->
+                 case proplists:get_value('$ancestors', Dict) of
+                     [Sup, rabbit_amqqueue_sup_sup | _] ->
+                         exit(Sup, kill),
+                         exit(Pid, kill);
+                     _ ->
+                         ok
+                 end
+         end
+     end || Pid <- Pids, node(Pid) =:= node(),
+            true =:= erlang:is_process_alive(Pid)].
 
 %% Add to the end, so they are in descending order of age, see
 %% rabbit_mirror_queue_misc:promote_slave/1
@@ -542,9 +564,8 @@ confirm_messages(MsgIds, State = #state { msg_id_status = MS }) ->
 handle_process_result({ok,   State}) -> noreply(State);
 handle_process_result({stop, State}) -> {stop, normal, State}.
 
--ifdef(use_specs).
--spec(promote_me/2 :: ({pid(), term()}, #state{}) -> no_return()).
--endif.
+-spec promote_me({pid(), term()}, #state{}) -> no_return().
+
 promote_me(From, #state { q                   = Q = #amqqueue { name = QName },
                           gm                  = GM,
                           backing_queue       = BQ,

@@ -45,35 +45,31 @@
 
 %%----------------------------------------------------------------------------
 
--ifdef(use_specs).
+-spec start_link() -> rabbit_types:ok_pid_or_error().
 
--spec(start_link/0 :: () -> rabbit_types:ok_pid_or_error()).
+-spec running_nodes_filename() -> string().
+-spec cluster_status_filename() -> string().
+-spec prepare_cluster_status_files() -> 'ok'.
+-spec write_cluster_status(rabbit_mnesia:cluster_status()) -> 'ok'.
+-spec read_cluster_status() -> rabbit_mnesia:cluster_status().
+-spec update_cluster_status() -> 'ok'.
+-spec reset_cluster_status() -> 'ok'.
 
--spec(running_nodes_filename/0 :: () -> string()).
--spec(cluster_status_filename/0 :: () -> string()).
--spec(prepare_cluster_status_files/0 :: () -> 'ok').
--spec(write_cluster_status/1 :: (rabbit_mnesia:cluster_status()) -> 'ok').
--spec(read_cluster_status/0 :: () -> rabbit_mnesia:cluster_status()).
--spec(update_cluster_status/0 :: () -> 'ok').
--spec(reset_cluster_status/0 :: () -> 'ok').
+-spec notify_node_up() -> 'ok'.
+-spec notify_joined_cluster() -> 'ok'.
+-spec notify_left_cluster(node()) -> 'ok'.
 
--spec(notify_node_up/0 :: () -> 'ok').
--spec(notify_joined_cluster/0 :: () -> 'ok').
--spec(notify_left_cluster/1 :: (node()) -> 'ok').
+-spec partitions() -> [node()].
+-spec partitions([node()]) -> [{node(), [node()]}].
+-spec status([node()]) -> {[{node(), [node()]}], [node()]}.
+-spec subscribe(pid()) -> 'ok'.
+-spec pause_partition_guard() -> 'ok' | 'pausing'.
 
--spec(partitions/0 :: () -> [node()]).
--spec(partitions/1 :: ([node()]) -> [{node(), [node()]}]).
--spec(status/1 :: ([node()]) -> {[{node(), [node()]}], [node()]}).
--spec(subscribe/1 :: (pid()) -> 'ok').
--spec(pause_partition_guard/0 :: () -> 'ok' | 'pausing').
-
--spec(all_rabbit_nodes_up/0 :: () -> boolean()).
--spec(run_outside_applications/2 :: (fun (() -> any()), boolean()) -> pid()).
--spec(ping_all/0 :: () -> 'ok').
--spec(alive_nodes/1 :: ([node()]) -> [node()]).
--spec(alive_rabbit_nodes/1 :: ([node()]) -> [node()]).
-
--endif.
+-spec all_rabbit_nodes_up() -> boolean().
+-spec run_outside_applications(fun (() -> any()), boolean()) -> pid().
+-spec ping_all() -> 'ok'.
+-spec alive_nodes([node()]) -> [node()].
+-spec alive_rabbit_nodes([node()]) -> [node()].
 
 %%----------------------------------------------------------------------------
 %% Start
@@ -414,7 +410,12 @@ handle_cast({check_partial_partition, Node, Rep, NodeGUID, MyGUID, RepGUID},
                    fun () ->
                            case rpc:call(Node, rabbit, is_running, []) of
                                {badrpc, _} -> ok;
-                               _           -> cast(Rep, {partial_partition,
+                               _           ->  
+				   rabbit_log:warning("Received a 'DOWN' message" 
+						      " from ~p but still can" 
+						      " communicate with it ~n",
+						      [Node]),
+				   cast(Rep, {partial_partition,
                                                          Node, node(), RepGUID})
                            end
                    end);

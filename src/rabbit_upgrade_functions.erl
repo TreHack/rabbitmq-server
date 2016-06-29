@@ -24,6 +24,7 @@
 -rabbit_upgrade({remove_user_scope,     mnesia, []}).
 -rabbit_upgrade({hash_passwords,        mnesia, []}).
 -rabbit_upgrade({add_ip_to_listener,    mnesia, []}).
+-rabbit_upgrade({add_opts_to_listener,  mnesia, [add_ip_to_listener]}).
 -rabbit_upgrade({internal_exchanges,    mnesia, []}).
 -rabbit_upgrade({user_to_internal_user, mnesia, [hash_passwords]}).
 -rabbit_upgrade({topic_trie,            mnesia, []}).
@@ -51,6 +52,8 @@
 -rabbit_upgrade({down_slave_nodes,      mnesia, [queue_decorators]}).
 -rabbit_upgrade({queue_state,           mnesia, [down_slave_nodes]}).
 -rabbit_upgrade({recoverable_slaves,    mnesia, [queue_state]}).
+-rabbit_upgrade({policy_version,        mnesia, [recoverable_slaves]}).
+-rabbit_upgrade({slave_pids_pending_shutdown, mnesia, [policy_version]}).
 -rabbit_upgrade({user_password_hashing, mnesia, [hash_passwords]}).
 -rabbit_upgrade({vhost_limits,          mnesia, []}).
 -rabbit_upgrade({tracked_connection,    mnesia, [vhost_limits]}).
@@ -58,42 +61,40 @@
 
 %% -------------------------------------------------------------------
 
--ifdef(use_specs).
+-spec remove_user_scope() -> 'ok'.
+-spec hash_passwords() -> 'ok'.
+-spec add_ip_to_listener() -> 'ok'.
+-spec add_opts_to_listener() -> 'ok'.
+-spec internal_exchanges() -> 'ok'.
+-spec user_to_internal_user() -> 'ok'.
+-spec topic_trie() -> 'ok'.
+-spec semi_durable_route() -> 'ok'.
+-spec exchange_event_serial() -> 'ok'.
+-spec trace_exchanges() -> 'ok'.
+-spec user_admin_to_tags() -> 'ok'.
+-spec ha_mirrors() -> 'ok'.
+-spec gm() -> 'ok'.
+-spec exchange_scratch() -> 'ok'.
+-spec mirrored_supervisor() -> 'ok'.
+-spec topic_trie_node() -> 'ok'.
+-spec runtime_parameters() -> 'ok'.
+-spec policy() -> 'ok'.
+-spec sync_slave_pids() -> 'ok'.
+-spec no_mirror_nodes() -> 'ok'.
+-spec gm_pids() -> 'ok'.
+-spec exchange_decorators() -> 'ok'.
+-spec policy_apply_to() -> 'ok'.
+-spec queue_decorators() -> 'ok'.
+-spec internal_system_x() -> 'ok'.
+-spec cluster_name() -> 'ok'.
+-spec down_slave_nodes() -> 'ok'.
+-spec queue_state() -> 'ok'.
+-spec recoverable_slaves() -> 'ok'.
+-spec user_password_hashing() -> 'ok'.
+-spec vhost_limits() -> 'ok'.
+-spec tracked_connection() -> 'ok'.
+-spec tracked_connection_per_vhost() -> 'ok'.
 
--spec(remove_user_scope/0            :: () -> 'ok').
--spec(hash_passwords/0               :: () -> 'ok').
--spec(add_ip_to_listener/0           :: () -> 'ok').
--spec(internal_exchanges/0           :: () -> 'ok').
--spec(user_to_internal_user/0        :: () -> 'ok').
--spec(topic_trie/0                   :: () -> 'ok').
--spec(semi_durable_route/0           :: () -> 'ok').
--spec(exchange_event_serial/0        :: () -> 'ok').
--spec(trace_exchanges/0              :: () -> 'ok').
--spec(user_admin_to_tags/0           :: () -> 'ok').
--spec(ha_mirrors/0                   :: () -> 'ok').
--spec(gm/0                           :: () -> 'ok').
--spec(exchange_scratch/0             :: () -> 'ok').
--spec(mirrored_supervisor/0          :: () -> 'ok').
--spec(topic_trie_node/0              :: () -> 'ok').
--spec(runtime_parameters/0           :: () -> 'ok').
--spec(policy/0                       :: () -> 'ok').
--spec(sync_slave_pids/0              :: () -> 'ok').
--spec(no_mirror_nodes/0              :: () -> 'ok').
--spec(gm_pids/0                      :: () -> 'ok').
--spec(exchange_decorators/0          :: () -> 'ok').
--spec(policy_apply_to/0              :: () -> 'ok').
--spec(queue_decorators/0             :: () -> 'ok').
--spec(internal_system_x/0            :: () -> 'ok').
--spec(cluster_name/0                 :: () -> 'ok').
--spec(down_slave_nodes/0             :: () -> 'ok').
--spec(queue_state/0                  :: () -> 'ok').
--spec(recoverable_slaves/0           :: () -> 'ok').
--spec(user_password_hashing/0        :: () -> 'ok').
--spec(vhost_limits/0                 :: () -> 'ok').
--spec(tracked_connection/0           :: () -> 'ok').
--spec(tracked_connection_per_vhost/0 :: () -> 'ok').
-
--endif.
 
 %%--------------------------------------------------------------------
 
@@ -154,6 +155,14 @@ add_ip_to_listener() ->
               {listener, Node, Protocol, Host, {0,0,0,0}, Port}
       end,
       [node, protocol, host, ip_address, port]).
+
+add_opts_to_listener() ->
+    transform(
+      rabbit_listener,
+      fun ({listener, Node, Protocol, Host, IP, Port}) ->
+              {listener, Node, Protocol, Host, IP, Port, []}
+      end,
+      [node, protocol, host, ip_address, port, opts]).
 
 internal_exchanges() ->
     Tables = [rabbit_exchange, rabbit_durable_exchange],
@@ -465,6 +474,42 @@ recoverable_slaves(Table) ->
       [name, durable, auto_delete, exclusive_owner, arguments, pid, slave_pids,
        sync_slave_pids, recoverable_slaves, policy, gm_pids, decorators,
        state]).
+
+policy_version() ->
+    ok = policy_version(rabbit_queue),
+    ok = policy_version(rabbit_durable_queue).
+
+policy_version(Table) ->
+    transform(
+      Table,
+      fun ({amqqueue, Name, Durable, AutoDelete, ExclusiveOwner, Arguments,
+            Pid, SlavePids, SyncSlavePids, DSN, Policy, GmPids, Decorators,
+            State}) ->
+              {amqqueue, Name, Durable, AutoDelete, ExclusiveOwner, Arguments,
+               Pid, SlavePids, SyncSlavePids, DSN, Policy, GmPids, Decorators,
+               State, 0}
+      end,
+      [name, durable, auto_delete, exclusive_owner, arguments, pid, slave_pids,
+       sync_slave_pids, recoverable_slaves, policy, gm_pids, decorators, state,
+       policy_version]).
+
+slave_pids_pending_shutdown() ->
+    ok = slave_pids_pending_shutdown(rabbit_queue),
+    ok = slave_pids_pending_shutdown(rabbit_durable_queue).
+
+slave_pids_pending_shutdown(Table) ->
+    transform(
+      Table,
+      fun ({amqqueue, Name, Durable, AutoDelete, ExclusiveOwner, Arguments,
+            Pid, SlavePids, SyncSlavePids, DSN, Policy, GmPids, Decorators,
+            State, PolicyVersion}) ->
+              {amqqueue, Name, Durable, AutoDelete, ExclusiveOwner, Arguments,
+               Pid, SlavePids, SyncSlavePids, DSN, Policy, GmPids, Decorators,
+               State, PolicyVersion, []}
+      end,
+      [name, durable, auto_delete, exclusive_owner, arguments, pid, slave_pids,
+       sync_slave_pids, recoverable_slaves, policy, gm_pids, decorators, state,
+       policy_version, slave_pids_pending_shutdown]).
 
 %% Prior to 3.6.0, passwords were hashed using MD5, this populates
 %% existing records with said default.  Users created with 3.6.0+ will

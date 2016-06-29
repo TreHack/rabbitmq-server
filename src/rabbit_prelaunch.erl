@@ -30,12 +30,8 @@
 %% Specs
 %%----------------------------------------------------------------------------
 
--ifdef(use_specs).
-
--spec(start/0 :: () -> no_return()).
--spec(stop/0 :: () -> 'ok').
-
--endif.
+-spec start() -> no_return().
+-spec stop() -> 'ok'.
 
 %%----------------------------------------------------------------------------
 
@@ -79,34 +75,38 @@ duplicate_node_check(NodeName, NodeHost) ->
     end.
 
 dist_port_set_check() ->
-    case os:getenv("RABBITMQ_CONFIG_FILE") of
-        false ->
+    case get_config(os:getenv("RABBITMQ_CONFIG_FILE")) of
+        {ok, [Config]} ->
+            Kernel = pget(kernel, Config, []),
+            case {pget(inet_dist_listen_min, Kernel, none),
+                  pget(inet_dist_listen_max, Kernel, none)} of
+                {none, none} -> ok;
+                _            -> rabbit_misc:quit(?DO_NOT_SET_DIST_PORT)
+            end;
+        {ok, _} ->
             ok;
-        File ->
-            case get_config(File) of
-                {ok, [Config]} ->
-                    Kernel = pget(kernel, Config, []),
-                    case {pget(inet_dist_listen_min, Kernel, none),
-                          pget(inet_dist_listen_max, Kernel, none)} of
-                        {none, none} -> ok;
-                        _            -> rabbit_misc:quit(?DO_NOT_SET_DIST_PORT)
-                    end;
-                {ok, _} ->
-                    ok;
-                {error, _} ->
-                    ok
-            end
+        {error, _} ->
+            ok
     end.
 
-get_config(File) ->
-    case rabbit_file:is_file(File ++ ".config") of
-        true  -> file:consult(File ++ ".config");
-        false ->
+get_config(File)  ->
+    case consult_file(File) of
+        {ok, Contents} -> {ok, Contents};
+        {error, _}     ->
             case rabbit_config:get_advanced_config() of
                 none     -> {error, enoent};
                 FileName -> file:consult(FileName)
             end
     end.
+
+consult_file(false) -> {error, nofile};
+consult_file(File)  ->
+    FileName = case filename:extension(File) of
+        ""        -> File ++ ".config";
+        ".config" -> File;
+        _         -> ""
+    end,
+    file:consult(FileName).
 
 dist_port_range_check() ->
     case os:getenv("RABBITMQ_DIST_PORT") of
@@ -139,10 +139,9 @@ dist_port_use_check_ipv6(NodeHost, Port) ->
 	{error, _} -> dist_port_use_check_fail(Port, NodeHost)
     end.
 
--ifdef(use_specs).
--spec(dist_port_use_check_fail/2 :: (non_neg_integer(), string()) ->
-                                         no_return()).
--endif.
+-spec dist_port_use_check_fail(non_neg_integer(), string()) ->
+                                         no_return().
+
 dist_port_use_check_fail(Port, Host) ->
     {ok, Names} = rabbit_nodes:names(Host),
     case [N || {N, P} <- Names, P =:= Port] of

@@ -2,16 +2,19 @@
 .sw?
 .*.sw?
 *.beam
-.erlang.mk/
-cover/
-debug/
-deps/
-debug/
-doc/
-ebin/
-etc/
-logs/
-plugins/
+*.coverdata
+/.erlang.mk/
+/cover/
+/debug/
+/deps/
+/debug/
+/doc/
+/ebin/
+/etc/
+/logs/
+/plugins/
+/test/ct.cover.spec
+/xrefr
 
 PACKAGES/
 

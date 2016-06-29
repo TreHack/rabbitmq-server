@@ -50,48 +50,44 @@
 
 %%----------------------------------------------------------------------------
 
--ifdef(use_specs).
-
 -export_type([node_type/0, cluster_status/0]).
 
--type(node_type() :: disc | ram).
--type(cluster_status() :: {[node()], [node()], [node()]}).
+-type node_type() :: disc | ram.
+-type cluster_status() :: {[node()], [node()], [node()]}.
 
 %% Main interface
--spec(init/0 :: () -> 'ok').
--spec(join_cluster/2 :: (node(), node_type())
-                        -> 'ok' | {'ok', 'already_member'}).
--spec(reset/0 :: () -> 'ok').
--spec(force_reset/0 :: () -> 'ok').
--spec(update_cluster_nodes/1 :: (node()) -> 'ok').
--spec(change_cluster_node_type/1 :: (node_type()) -> 'ok').
--spec(forget_cluster_node/2 :: (node(), boolean()) -> 'ok').
--spec(force_load_next_boot/0 :: () -> 'ok').
+-spec init() -> 'ok'.
+-spec join_cluster(node(), node_type())
+                        -> 'ok' | {'ok', 'already_member'}.
+-spec reset() -> 'ok'.
+-spec force_reset() -> 'ok'.
+-spec update_cluster_nodes(node()) -> 'ok'.
+-spec change_cluster_node_type(node_type()) -> 'ok'.
+-spec forget_cluster_node(node(), boolean()) -> 'ok'.
+-spec force_load_next_boot() -> 'ok'.
 
 %% Various queries to get the status of the db
--spec(status/0 :: () -> [{'nodes', [{node_type(), [node()]}]} |
+-spec status() -> [{'nodes', [{node_type(), [node()]}]} |
                          {'running_nodes', [node()]} |
-                         {'partitions', [{node(), [node()]}]}]).
--spec(is_clustered/0 :: () -> boolean()).
--spec(on_running_node/1 :: (pid()) -> boolean()).
--spec(is_process_alive/1 :: (pid()) -> boolean()).
--spec(cluster_nodes/1 :: ('all' | 'disc' | 'ram' | 'running') -> [node()]).
--spec(node_type/0 :: () -> node_type()).
--spec(dir/0 :: () -> file:filename()).
--spec(cluster_status_from_mnesia/0 :: () -> rabbit_types:ok_or_error2(
-                                              cluster_status(), any())).
+                         {'partitions', [{node(), [node()]}]}].
+-spec is_clustered() -> boolean().
+-spec on_running_node(pid()) -> boolean().
+-spec is_process_alive(pid()) -> boolean().
+-spec cluster_nodes('all' | 'disc' | 'ram' | 'running') -> [node()].
+-spec node_type() -> node_type().
+-spec dir() -> file:filename().
+-spec cluster_status_from_mnesia() -> rabbit_types:ok_or_error2(
+                                              cluster_status(), any()).
 
 %% Operations on the db and utils, mainly used in `rabbit_upgrade' and `rabbit'
--spec(init_db_unchecked/2 :: ([node()], node_type()) -> 'ok').
--spec(copy_db/1 :: (file:filename()) ->  rabbit_types:ok_or_error(any())).
--spec(check_cluster_consistency/0 :: () -> 'ok').
--spec(ensure_mnesia_dir/0 :: () -> 'ok').
+-spec init_db_unchecked([node()], node_type()) -> 'ok'.
+-spec copy_db(file:filename()) ->  rabbit_types:ok_or_error(any()).
+-spec check_cluster_consistency() -> 'ok'.
+-spec ensure_mnesia_dir() -> 'ok'.
 
 %% Hooks used in `rabbit_node_monitor'
--spec(on_node_up/1 :: (node()) -> 'ok').
--spec(on_node_down/1 :: (node()) -> 'ok').
-
--endif.
+-spec on_node_up(node()) -> 'ok'.
+-spec on_node_down(node()) -> 'ok'.
 
 %%----------------------------------------------------------------------------
 %% Main interface
@@ -423,6 +419,7 @@ cluster_status(WhichNodes) ->
 
 node_info() ->
     {rabbit_misc:otp_release(), rabbit_misc:version(),
+     mnesia:system_info(protocol_version),
      cluster_status_from_mnesia()}.
 
 node_type() ->
@@ -595,25 +592,36 @@ check_cluster_consistency() ->
     end.
 
 check_cluster_consistency(Node, CheckNodesConsistency) ->
-    case rpc:call(Node, rabbit_mnesia, node_info, []) of
+    case remote_node_info(Node) of
         {badrpc, _Reason} ->
             {error, not_found};
-        {_OTP, _Rabbit, {error, _}} ->
+        {_OTP, Rabbit, DelegateModuleHash, _Status} when is_binary(DelegateModuleHash) ->
+            %% when a delegate module .beam file hash is present
+            %% in the tuple, we are dealing with an old version
+            rabbit_version:version_error("Rabbit", rabbit_misc:version(), Rabbit);
+        {_OTP, _Rabbit, _Protocol, {error, _}} ->
             {error, not_found};
-        {OTP, Rabbit, {ok, Status}} when CheckNodesConsistency ->
-            case check_consistency(OTP, Rabbit, Node, Status) of
+        {OTP, Rabbit, Protocol, {ok, Status}} when CheckNodesConsistency ->
+            case check_consistency(Node, OTP, Rabbit, Protocol, Status) of
                 {error, _} = E -> E;
                 {ok, Res}      -> {ok, Res}
             end;
-        {OTP, Rabbit, {ok, Status}} ->
-            case check_consistency(OTP, Rabbit) of
+        {OTP, Rabbit, Protocol, {ok, Status}} ->
+            case check_consistency(Node, OTP, Rabbit, Protocol) of
                 {error, _} = E -> E;
                 ok             -> {ok, Status}
-            end;
-        {_OTP, Rabbit, _Hash, _Status} ->
-            %% delegate hash checking implies version mismatch
-            rabbit_version:version_error("Rabbit", rabbit_misc:version(), Rabbit)
+            end
     end.
+
+remote_node_info(Node) ->
+    case rpc:call(Node, rabbit_mnesia, node_info, []) of
+        {badrpc, _} = Error   -> Error;
+        %% RabbitMQ prior to 3.6.2
+        {OTP, Rabbit, Status} -> {OTP, Rabbit, unsupported, Status};
+        %% RabbitMQ 3.6.2 or later
+        {OTP, Rabbit, Protocol, Status} -> {OTP, Rabbit, Protocol, Status}
+    end.
+
 
 %%--------------------------------------------------------------------
 %% Hooks for `rabbit_node_monitor'
@@ -765,14 +773,14 @@ change_extra_db_nodes(ClusterNodes0, CheckOtherNodes) ->
             Nodes
     end.
 
-check_consistency(OTP, Rabbit) ->
+check_consistency(Node, OTP, Rabbit, ProtocolVersion) ->
     rabbit_misc:sequence_error(
-      [rabbit_version:check_otp_consistency(OTP),
+      [check_mnesia_or_otp_consistency(Node, ProtocolVersion, OTP),
        check_rabbit_consistency(Rabbit)]).
 
-check_consistency(OTP, Rabbit, Node, Status) ->
+check_consistency(Node, OTP, Rabbit, ProtocolVersion, Status) ->
     rabbit_misc:sequence_error(
-      [rabbit_version:check_otp_consistency(OTP),
+      [check_mnesia_or_otp_consistency(Node, ProtocolVersion, OTP),
        check_rabbit_consistency(Rabbit),
        check_nodes_consistency(Node, Status)]).
 
@@ -785,6 +793,55 @@ check_nodes_consistency(Node, RemoteStatus = {RemoteAllNodes, _, _}) ->
                      rabbit_misc:format("Node ~p thinks it's clustered "
                                         "with node ~p, but ~p disagrees",
                                         [node(), Node, Node])}}
+    end.
+
+check_mnesia_or_otp_consistency(_Node, unsupported, OTP) ->
+    rabbit_version:check_otp_consistency(OTP);
+check_mnesia_or_otp_consistency(Node, ProtocolVersion, _) ->
+    check_mnesia_consistency(Node, ProtocolVersion).
+
+check_mnesia_consistency(Node, ProtocolVersion) ->
+    % If mnesia is running we will just check protocol version
+    % If it's not running, we don't want it to join cluster until all checks pass
+    % so we start it without `dir` env variable to prevent
+    % joining cluster and/or corrupting data
+    with_running_or_clean_mnesia(fun() ->
+        case negotiate_protocol([Node]) of
+            [Node] -> ok;
+            []     ->
+                LocalVersion = mnesia:system_info(protocol_version),
+                {error, {inconsistent_cluster,
+                         rabbit_misc:format("Mnesia protocol negotiation failed."
+                                            " Local version: ~p."
+                                            " Remote version ~p",
+                                            [LocalVersion, ProtocolVersion])}}
+        end
+    end).
+
+negotiate_protocol([Node]) ->
+    mnesia_monitor:negotiate_protocol([Node]).
+
+with_running_or_clean_mnesia(Fun) ->
+    IsMnesiaRunning = case mnesia:system_info(is_running) of
+        yes      -> true;
+        no       -> false;
+        stopping ->
+            ensure_mnesia_not_running(),
+            false;
+        starting ->
+            ensure_mnesia_running(),
+            true
+    end,
+    case IsMnesiaRunning of
+        true  -> Fun();
+        false ->
+            {ok, MnesiaDir} = application:get_env(mnesia, dir),
+            application:unset_env(mnesia, dir),
+            mnesia:start(),
+            Result = Fun(),
+            application:stop(mnesia),
+            application:set_env(mnesia, dir, MnesiaDir),
+            Result
     end.
 
 check_rabbit_consistency(Remote) ->
@@ -821,16 +878,20 @@ find_auto_cluster_node([Node | Nodes]) ->
                      "Could not auto-cluster with ~s: " ++ Fmt, [Node | Args]),
                    find_auto_cluster_node(Nodes)
            end,
-    case rpc:call(Node, rabbit_mnesia, node_info, []) of
-        {badrpc, _} = Reason         -> Fail("~p~n", [Reason]);
+    case remote_node_info(Node) of
+        {badrpc, _} = Reason ->
+            Fail("~p~n", [Reason]);
         %% old delegate hash check
-        {_OTP, RMQ, _Hash, _}        -> Fail("version ~s~n", [RMQ]);
-        {_OTP, _RMQ, {error, _} = E} -> Fail("~p~n", [E]);
-        {OTP, RMQ, _}                -> case check_consistency(OTP, RMQ) of
-                                            {error, _} -> Fail("versions ~p~n",
-                                                               [{OTP, RMQ}]);
-                                            ok         -> {ok, Node}
-                                        end
+        {_OTP, RMQ, Hash, _} when is_binary(Hash) ->
+            Fail("version ~s~n", [RMQ]);
+        {_OTP, _RMQ, _Protocol, {error, _} = E} ->
+            Fail("~p~n", [E]);
+        {OTP, RMQ, Protocol, _} ->
+            case check_consistency(Node, OTP, RMQ, Protocol) of
+                {error, _} -> Fail("versions ~p~n",
+                                   [{OTP, RMQ}]);
+                ok         -> {ok, Node}
+            end
     end.
 
 is_only_clustered_disc_node() ->

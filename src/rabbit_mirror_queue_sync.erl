@@ -52,32 +52,28 @@
 %%                 ||                 || -- sync_complete --> ||
 %%                 ||               (Dies)                    ||
 
--ifdef(use_specs).
+-type log_fun() :: fun ((string(), [any()]) -> 'ok').
+-type bq() :: atom().
+-type bqs() :: any().
+-type ack() :: any().
+-type slave_sync_state() :: {[{rabbit_types:msg_id(), ack()}], timer:tref(),
+                             bqs()}.
 
--type(log_fun() :: fun ((string(), [any()]) -> 'ok')).
--type(bq() :: atom()).
--type(bqs() :: any()).
--type(ack() :: any()).
--type(slave_sync_state() :: {[{rabbit_types:msg_id(), ack()}], timer:tref(),
-                             bqs()}).
-
--spec(master_prepare/4 :: (reference(), rabbit_amqqueue:name(),
-                               log_fun(), [pid()]) -> pid()).
--spec(master_go/8 :: (pid(), reference(), log_fun(),
+-spec master_prepare(reference(), rabbit_amqqueue:name(),
+                               log_fun(), [pid()]) -> pid().
+-spec master_go(pid(), reference(), log_fun(),
                       rabbit_mirror_queue_master:stats_fun(),
                       rabbit_mirror_queue_master:stats_fun(),
                       non_neg_integer(),
                       bq(), bqs()) ->
                           {'already_synced', bqs()} | {'ok', bqs()} |
                           {'shutdown', any(), bqs()} |
-                          {'sync_died', any(), bqs()}).
--spec(slave/7 :: (non_neg_integer(), reference(), timer:tref(), pid(),
+                          {'sync_died', any(), bqs()}.
+-spec slave(non_neg_integer(), reference(), timer:tref(), pid(),
                   bq(), bqs(), fun((bq(), bqs()) -> {timer:tref(), bqs()})) ->
                       'denied' |
                       {'ok' | 'failed', slave_sync_state()} |
-                      {'stop', any(), slave_sync_state()}).
-
--endif.
+                      {'stop', any(), slave_sync_state()}.
 
 %% ---------------------------------------------------------------------------
 %% Master
@@ -108,7 +104,7 @@ master_batch_go0(Args, BatchSize, BQ, BQS) ->
                     false -> {cont, Acc1}
                 end
         end,
-    FoldAcc = {[], 0, {0, BQ:depth(BQS)}, time_compat:monotonic_time()},
+    FoldAcc = {[], 0, {0, BQ:depth(BQS)}, erlang:monotonic_time()},
     bq_fold(FoldFun, FoldAcc, Args, BQ, BQS).
 
 master_batch_send({Syncer, Ref, Log, HandleInfo, EmitStats, Parent},
@@ -168,12 +164,12 @@ stop_syncer(Syncer, Msg) ->
     end.
 
 maybe_emit_stats(Last, I, EmitStats, Log) ->
-    Interval = time_compat:convert_time_unit(
-                 time_compat:monotonic_time() - Last, native, micro_seconds),
+    Interval = erlang:convert_time_unit(
+                 erlang:monotonic_time() - Last, native, micro_seconds),
     case Interval > ?SYNC_PROGRESS_INTERVAL of
         true  -> EmitStats({syncing, I}),
                  Log("~p messages", [I]),
-                 time_compat:monotonic_time();
+                 erlang:monotonic_time();
         false -> Last
     end.
 

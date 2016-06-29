@@ -341,19 +341,17 @@
 
 -rabbit_upgrade({multiple_routing_keys, local, []}).
 
--ifdef(use_specs).
+-type seq_id()  :: non_neg_integer().
 
--type(seq_id()  :: non_neg_integer()).
-
--type(rates() :: #rates { in        :: float(),
+-type rates() :: #rates { in        :: float(),
                           out       :: float(),
                           ack_in    :: float(),
                           ack_out   :: float(),
-                          timestamp :: rabbit_types:timestamp()}).
+                          timestamp :: rabbit_types:timestamp()}.
 
--type(delta() :: #delta { start_seq_id :: non_neg_integer(),
+-type delta() :: #delta { start_seq_id :: non_neg_integer(),
                           count        :: non_neg_integer(),
-                          end_seq_id   :: non_neg_integer() }).
+                          end_seq_id   :: non_neg_integer() }.
 
 %% The compiler (rightfully) complains that ack() and state() are
 %% unused. For this reason we duplicate a -spec from
@@ -361,8 +359,8 @@
 %% warnings. The problem here is that we can't parameterise the BQ
 %% behaviour by these two types as we would like to. We still leave
 %% these here for documentation purposes.
--type(ack() :: seq_id()).
--type(state() :: #vqstate {
+-type ack() :: seq_id().
+-type state() :: #vqstate {
              q1                    :: ?QUEUE:?QUEUE(),
              q2                    :: ?QUEUE:?QUEUE(),
              delta                 :: delta(),
@@ -404,13 +402,11 @@
              disk_write_count      :: non_neg_integer(),
 
              io_batch_size         :: pos_integer(),
-             mode                  :: 'default' | 'lazy' }).
+             mode                  :: 'default' | 'lazy' }.
 %% Duplicated from rabbit_backing_queue
--spec(ack/2 :: ([ack()], state()) -> {[rabbit_guid:guid()], state()}).
+-spec ack([ack()], state()) -> {[rabbit_guid:guid()], state()}.
 
--spec(multiple_routing_keys/0 :: () -> 'ok').
-
--endif.
+-spec multiple_routing_keys() -> 'ok'.
 
 -define(BLANK_DELTA, #delta { start_seq_id = undefined,
                               count        = 0,
@@ -556,7 +552,7 @@ delete_crashed(#amqqueue{name = QName}) ->
     ok = rabbit_queue_index:erase(QName).
 
 purge(State = #vqstate { len = Len }) ->
-    case is_pending_ack_empty(State) of
+    case is_pending_ack_empty(State) and is_unconfirmed_empty(State) of
         true ->
             {Len, purge_and_index_reset(State)};
         false ->
@@ -688,12 +684,12 @@ requeue(AckTags, #vqstate { mode       = default,
                                                   State2),
     MsgCount = length(MsgIds2),
     {MsgIds2, a(reduce_memory_use(
-                  maybe_update_rates(
+                  maybe_update_rates(ui(
                     State3 #vqstate { delta      = Delta1,
                                       q3         = Q3a,
                                       q4         = Q4a,
                                       in_counter = InCounter + MsgCount,
-                                      len        = Len + MsgCount })))};
+                                      len        = Len + MsgCount }))))};
 requeue(AckTags, #vqstate { mode       = lazy,
                             delta      = Delta,
                             q3         = Q3,
@@ -706,11 +702,11 @@ requeue(AckTags, #vqstate { mode       = lazy,
                                                 State1),
     MsgCount = length(MsgIds1),
     {MsgIds1, a(reduce_memory_use(
-                  maybe_update_rates(
+                  maybe_update_rates(ui(
                     State2 #vqstate { delta      = Delta1,
                                       q3         = Q3a,
                                       in_counter = InCounter + MsgCount,
-                                      len        = Len + MsgCount })))}.
+                                      len        = Len + MsgCount }))))}.
 
 ackfold(MsgFun, Acc, State, AckTags) ->
     {AccN, StateN} =
@@ -774,7 +770,7 @@ update_rates(State = #vqstate{ in_counter      =     InCount,
                                                ack_in    =  AckInRate,
                                                ack_out   = AckOutRate,
                                                timestamp = TS }}) ->
-    Now = time_compat:monotonic_time(),
+    Now = erlang:monotonic_time(),
 
     Rates = #rates { in        = update_rate(Now, TS,     InCount,     InRate),
                      out       = update_rate(Now, TS,    OutCount,    OutRate),
@@ -789,7 +785,7 @@ update_rates(State = #vqstate{ in_counter      =     InCount,
                    rates           = Rates }.
 
 update_rate(Now, TS, Count, Rate) ->
-    Time = time_compat:convert_time_unit(Now - TS, native, micro_seconds) /
+    Time = erlang:convert_time_unit(Now - TS, native, micro_seconds) /
         ?MICROS_PER_SECOND,
     if
         Time == 0 -> Rate;
@@ -1287,7 +1283,7 @@ init(IsDurable, IndexState, DeltaCount, DeltaBytes, Terms,
                                     count        = DeltaCount1,
                                     end_seq_id   = NextSeqId })
             end,
-    Now = time_compat:monotonic_time(),
+    Now = erlang:monotonic_time(),
     IoBatchSize = rabbit_misc:get_env(rabbit, msg_store_io_batch_size,
                                       ?IO_BATCH_SIZE),
 
@@ -1647,6 +1643,9 @@ reset_qi_state(State = #vqstate{index_state = IndexState}) ->
 
 is_pending_ack_empty(State) ->
     count_pending_acks(State) =:= 0.
+
+is_unconfirmed_empty(#vqstate { unconfirmed = UC }) ->
+    gb_sets:is_empty(UC).
 
 count_pending_acks(#vqstate { ram_pending_ack   = RPA,
                               disk_pending_ack  = DPA,
@@ -2124,7 +2123,7 @@ publish_alpha(MsgStatus, State) ->
     {MsgStatus, stats({1, -1}, {MsgStatus, MsgStatus}, State)}.
 
 publish_beta(MsgStatus, State) ->
-    {MsgStatus1, State1} = maybe_write_to_disk(true, false, MsgStatus, State),
+    {MsgStatus1, State1} = maybe_prepare_write_to_disk(true, false, MsgStatus, State),
     MsgStatus2 = m(trim_msg_status(MsgStatus1)),
     {MsgStatus2, stats({1, -1}, {MsgStatus, MsgStatus2}, State1)}.
 
@@ -2161,7 +2160,7 @@ delta_merge(SeqIds, Delta, MsgIds, State) ->
                         {#msg_status { msg_id = MsgId } = MsgStatus, State1} =
                             msg_from_pending_ack(SeqId, State0),
                         {_MsgStatus, State2} =
-                            maybe_write_to_disk(true, true, MsgStatus, State1),
+                            maybe_prepare_write_to_disk(true, true, MsgStatus, State1),
                         {expand_delta(SeqId, Delta0), [MsgId | MsgIds0],
                          stats({1, -1}, {MsgStatus, none}, State2)}
                 end, {Delta, MsgIds, State}, SeqIds).

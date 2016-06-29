@@ -22,7 +22,7 @@
          stop_and_halt/0, await_startup/0, status/0, is_running/0,
          is_running/1, environment/0, rotate_logs/0, force_event_refresh/1,
          start_fhc/0]).
--export([start/2, stop/1]).
+-export([start/2, stop/1, prep_stop/1]).
 -export([start_apps/1, stop_apps/1]).
 -export([log_locations/0, config_files/0]). %% for testing and mgmt-agent
 
@@ -204,47 +204,43 @@
 
 %%----------------------------------------------------------------------------
 
--ifdef(use_specs).
-
 %% this really should be an abstract type
--type(log_location() :: string()).
--type(param() :: atom()).
--type(app_name() :: atom()).
+-type log_location() :: string().
+-type param() :: atom().
+-type app_name() :: atom().
 
--spec(start/0 :: () -> 'ok').
--spec(boot/0 :: () -> 'ok').
--spec(stop/0 :: () -> 'ok').
--spec(stop_and_halt/0 :: () -> no_return()).
--spec(await_startup/0 :: () -> 'ok').
--spec(status/0 ::
+-spec start() -> 'ok'.
+-spec boot() -> 'ok'.
+-spec stop() -> 'ok'.
+-spec stop_and_halt() -> no_return().
+-spec await_startup() -> 'ok'.
+-spec status
         () -> [{pid, integer()} |
                {running_applications, [{atom(), string(), string()}]} |
                {os, {atom(), atom()}} |
                {erlang_version, string()} |
-               {memory, any()}]).
--spec(is_running/0 :: () -> boolean()).
--spec(is_running/1 :: (node()) -> boolean()).
--spec(environment/0 :: () -> [{param(), term()}]).
--spec(rotate_logs/0 :: () -> rabbit_types:ok_or_error(any())).
--spec(force_event_refresh/1 :: (reference()) -> 'ok').
+               {memory, any()}].
+-spec is_running() -> boolean().
+-spec is_running(node()) -> boolean().
+-spec environment() -> [{param(), term()}].
+-spec rotate_logs() -> rabbit_types:ok_or_error(any()).
+-spec force_event_refresh(reference()) -> 'ok'.
 
--spec(log_locations/0 :: () -> [log_location()]).
+-spec log_locations() -> [log_location()].
 
--spec(start/2 :: ('normal',[]) ->
-		      {'error',
-		       {'erlang_version_too_old',
-                        {'found',string(),string()},
-                        {'required',string(),string()}}} |
-		      {'ok',pid()}).
--spec(stop/1 :: (_) -> 'ok').
+-spec start('normal',[]) ->
+          {'error',
+           {'erlang_version_too_old',
+            {'found',string(),string()},
+            {'required',string(),string()}}} |
+          {'ok',pid()}.
+-spec stop(_) -> 'ok'.
 
--spec(maybe_insert_default_data/0 :: () -> 'ok').
--spec(boot_delegate/0 :: () -> 'ok').
--spec(recover/0 :: () -> 'ok').
--spec(start_apps/1 :: ([app_name()]) -> 'ok').
--spec(stop_apps/1 :: ([app_name()]) -> 'ok').
-
--endif.
+-spec maybe_insert_default_data() -> 'ok'.
+-spec boot_delegate() -> 'ok'.
+-spec recover() -> 'ok'.
+-spec start_apps([app_name()]) -> 'ok'.
+-spec stop_apps([app_name()]) -> 'ok'.
 
 %%----------------------------------------------------------------------------
 
@@ -507,6 +503,7 @@ await_startup(HaveSeenRabbitBoot) ->
 
 status() ->
     S1 = [{pid,                  list_to_integer(os:getpid())},
+          %% The timeout value used is twice that of gen_server:call/2.
           {running_applications, rabbit_misc:which_applications()},
           {os,                   os:type()},
           {erlang_version,       erlang:system_info(system_version)},
@@ -563,8 +560,9 @@ is_running() -> is_running(node()).
 is_running(Node) -> rabbit_nodes:is_process_running(Node, rabbit).
 
 environment() ->
+    %% The timeout value is twice that of gen_server:call/2.
     [{A, environment(A)} ||
-        {A, _, _} <- lists:keysort(1, application:which_applications())].
+        {A, _, _} <- lists:keysort(1, application:which_applications(10000))].
 
 environment(App) ->
     Ignore = [default_pass, included_applications],
@@ -612,17 +610,18 @@ start(normal, []) ->
             Error
     end.
 
-stop(_State) ->
+prep_stop(_State) ->
     ok = rabbit_alarm:stop(),
     ok = case rabbit_mnesia:is_clustered() of
-             true  -> rabbit_amqqueue:on_node_down(node());
+             true  -> ok;
              false -> rabbit_table:clear_ram_only_tables()
          end,
     ok.
 
--ifdef(use_specs).
--spec(boot_error/2 :: (atom(), term()) -> no_return()).
--endif.
+stop(_) -> ok.
+
+-spec boot_error(atom(), term()) -> no_return().
+
 boot_error(_, {could_not_start, rabbit, {{timeout_waiting_for_tables, _}, _}}) ->
     AllNodes = rabbit_mnesia:cluster_nodes(all),
     Suffix = "~nBACKGROUND~n==========~n~n"
@@ -731,7 +730,7 @@ log_broker_started(Plugins) ->
 
 erts_version_check() ->
     ERTSVer = erlang:system_info(version),
-    OTPRel = erlang:system_info(otp_release),
+    OTPRel = rabbit_misc:otp_release(),
     case rabbit_misc:version_compare(?ERTS_MINIMUM, ERTSVer, lte) of
         true when ?ERTS_MINIMUM =/= ERTSVer ->
             ok;
