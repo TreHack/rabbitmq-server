@@ -24,7 +24,8 @@
 
 all() ->
     [
-      {group, cluster_size_1}
+      {group, cluster_size_1},
+      {group, cluster_size_2}
     ].
 
 groups() ->
@@ -33,6 +34,11 @@ groups() ->
           most_basic_single_node_connection_tracking_test,
           single_node_single_vhost_connection_tracking_test,
           single_node_multiple_vhost_connection_tracking_test
+        ]},
+      {cluster_size_2, [], [
+          most_basic_cluster_connection_tracking_test,
+          cluster_single_vhost_connection_tracking_test,
+          cluster_multiple_vhost_connection_tracking_test
         ]}
     ].
 
@@ -56,7 +62,7 @@ init_per_group(cluster_size_1, Config) ->
     rabbit_ct_helpers:run_steps(Config1,
       rabbit_ct_broker_helpers:setup_steps() ++
       rabbit_ct_client_helpers:setup_steps());
-init_per_group(cluster_size_3, Config) ->
+init_per_group(cluster_size_2, Config) ->
     Suffix = rabbit_ct_helpers:testcase_absname(Config, "", "-"),
     Config1 = rabbit_ct_helpers:set_config(Config, [
                                                     {rmq_nodes_count, 3},
@@ -84,11 +90,12 @@ end_per_testcase(Testcase, Config) ->
 %% -------------------------------------------------------------------
 
 most_basic_single_node_connection_tracking_test(Config) ->
-    ?assertEqual(0, count_connections_in(Config, <<"/">>)),
+    VHost = <<"/">>,
+    ?assertEqual(0, count_connections_in(Config, VHost)),
     Conn = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0),
-    ?assertEqual(1, count_connections_in(Config, <<"/">>)),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
     amqp_connection:close(Conn),
-    ?assertEqual(0, count_connections_in(Config, <<"/">>)),
+    ?assertEqual(0, count_connections_in(Config, VHost)),
 
     passed.
 
@@ -172,6 +179,108 @@ single_node_multiple_vhost_connection_tracking_test(Config) ->
     rabbit_ct_broker_helpers:delete_vhost(Config, VHost2),
 
     passed.
+
+most_basic_cluster_connection_tracking_test(Config) ->
+    VHost = <<"/">>,
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+    Conn1 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
+
+    Conn2 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1),
+    ?assertEqual(2, count_connections_in(Config, VHost)),
+
+    Conn3 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1),
+    ?assertEqual(3, count_connections_in(Config, VHost)),
+
+    lists:foreach(fun (C) ->
+                          amqp_connection:close(C)
+                  end, [Conn1, Conn2, Conn3]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    passed.
+
+cluster_single_vhost_connection_tracking_test(Config) ->
+    VHost = <<"/">>,
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn1 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
+    amqp_connection:close(Conn1),
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn2 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
+
+    Conn3 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0),
+    ?assertEqual(2, count_connections_in(Config, VHost)),
+
+    Conn4 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1),
+    ?assertEqual(3, count_connections_in(Config, VHost)),
+
+    (catch exit(Conn4, please_terminate)),
+    ?assertEqual(2, count_connections_in(Config, VHost)),
+
+    Conn5 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1),
+    ?assertEqual(3, count_connections_in(Config, VHost)),
+
+    lists:foreach(fun (C) ->
+                          amqp_connection:close(C)
+                  end, [Conn2, Conn3, Conn5]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    passed.
+
+cluster_multiple_vhost_connection_tracking_test(Config) ->
+    VHost1 = <<"vhost1">>,
+    VHost2 = <<"vhost2">>,
+
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
+
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+    ?assertEqual(0, count_connections_in(Config, VHost2)),
+
+    Conn1 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0, VHost1),
+    ?assertEqual(1, count_connections_in(Config, VHost1)),
+    amqp_connection:close(Conn1),
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+
+    Conn2 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1, VHost2),
+    ?assertEqual(1, count_connections_in(Config, VHost2)),
+
+    Conn3 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1, VHost1),
+    ?assertEqual(1, count_connections_in(Config, VHost1)),
+    ?assertEqual(1, count_connections_in(Config, VHost2)),
+
+    Conn4 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0, VHost1),
+    ?assertEqual(2, count_connections_in(Config, VHost1)),
+
+    (catch exit(Conn4, please_terminate)),
+    ?assertEqual(1, count_connections_in(Config, VHost1)),
+
+    Conn5 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 1, VHost2),
+    ?assertEqual(2, count_connections_in(Config, VHost2)),
+
+    Conn6 = rabbit_ct_client_helpers:open_unmanaged_connection(Config, 0, VHost2),
+    ?assertEqual(3, count_connections_in(Config, VHost2)),
+
+    lists:foreach(fun (C) ->
+                          amqp_connection:close(C)
+                  end, [Conn2, Conn3, Conn5, Conn6]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+    ?assertEqual(0, count_connections_in(Config, VHost2)),
+
+    rabbit_ct_broker_helpers:delete_vhost(Config, VHost1),
+    rabbit_ct_broker_helpers:delete_vhost(Config, VHost2),
+
+    passed.
+
 
 %% -------------------------------------------------------------------
 %% Helpers
