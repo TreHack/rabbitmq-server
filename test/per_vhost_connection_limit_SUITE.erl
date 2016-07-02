@@ -41,7 +41,8 @@ groups() ->
       {cluster_size_2, [], [
           most_basic_cluster_connection_tracking_test,
           cluster_single_vhost_connection_tracking_test,
-          cluster_multiple_vhost_connection_tracking_test
+          cluster_multiple_vhost_connection_tracking_test,
+          cluster_node_shutdown_connection_tracking_test
         ]}
     ].
 
@@ -281,6 +282,38 @@ cluster_multiple_vhost_connection_tracking_test(Config) ->
 
     rabbit_ct_broker_helpers:delete_vhost(Config, VHost1),
     rabbit_ct_broker_helpers:delete_vhost(Config, VHost2),
+
+    passed.
+
+cluster_node_shutdown_connection_tracking_test(Config) ->
+    VHost = <<"/">>,
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn1 = open_unmanaged_connection(Config, 0),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
+    amqp_connection:close(Conn1),
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn2 = open_unmanaged_connection(Config, 1),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
+
+    Conn3 = open_unmanaged_connection(Config, 0),
+    ?assertEqual(2, count_connections_in(Config, VHost)),
+
+    Conn4 = open_unmanaged_connection(Config, 1),
+    ?assertEqual(3, count_connections_in(Config, VHost)),
+
+    Conn5 = open_unmanaged_connection(Config, 1),
+    ?assertEqual(4, count_connections_in(Config, VHost)),
+
+    rabbit_ct_broker_helpers:restart_broker(Config, 1),
+    ?assertEqual(1, count_connections_in(Config, VHost)),
+
+    lists:foreach(fun (C) ->
+                          (catch amqp_connection:close(C))
+                  end, [Conn2, Conn3, Conn4, Conn5]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
 
     passed.
 
