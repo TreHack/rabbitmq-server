@@ -29,13 +29,6 @@
          tracked_connection_from_connection_created/1,
          is_over_connection_limit/1, count_connections_in/1]).
 
--ifdef(use_specs).
-
--spec(register_connection/1   :: (rabbit_types:tracked_connection()) -> ok).
--spec(unregister_connection/1 :: (rabbit_types:connection_name()) -> ok).
-
--endif.
-
 -include_lib("rabbit.hrl").
 
 -define(TABLE,  rabbit_tracked_connection).
@@ -45,6 +38,8 @@
 %% API
 %%
 
+-spec register_connection(rabbit_types:tracked_connection()) -> ok.
+
 register_connection(#tracked_connection{vhost = VHost} = Conn) ->
     rabbit_misc:execute_mnesia_transaction(
       fun() ->
@@ -53,6 +48,8 @@ register_connection(#tracked_connection{vhost = VHost} = Conn) ->
                 rabbit_tracked_connection_per_vhost, VHost, 1),
               ok
       end).
+
+-spec unregister_connection(rabbit_types:connection_name()) -> ok.
 
 unregister_connection(ConnId = {_Node, _Name}) ->
     rabbit_misc:execute_mnesia_transaction(

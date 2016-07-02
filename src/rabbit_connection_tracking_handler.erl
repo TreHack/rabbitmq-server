@@ -33,9 +33,6 @@
 -export([init/1, handle_call/2, handle_event/2, handle_info/2,
          terminate/2, code_change/3]).
 
--ifdef(use_specs).
--endif.
-
 -include_lib("rabbit.hrl").
 
 -rabbit_boot_step({?MODULE,
@@ -69,12 +66,12 @@ handle_event(#event{type = connection_closed, props = Details}, State) ->
          proplists:get_value(name, Details)}),
     {ok, State};
 handle_event(#event{type = vhost_deleted, props = Details}, State) ->
-    VHost = proplists:get_value(name, Details),
+    _VHost = proplists:get_value(name, Details),
     %% TODO: force close and unregister connections in
     %%       this vhost. Moved to rabbitmq/rabbitmq-server#627.
     {ok, State};
 handle_event(#event{type = user_deleted, props = Details}, State) ->
-    Username = proplists:get_value(name, Details),
+    _Username = proplists:get_value(name, Details),
     %% TODO: force close and unregister connections from
     %%       this user. Moved to rabbitmq/rabbitmq-server#628.
     {ok, State};
