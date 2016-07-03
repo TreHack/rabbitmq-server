@@ -28,8 +28,9 @@
 
 all() ->
     [
-      {group, cluster_size_1},
-      {group, cluster_size_2}
+     {group, cluster_size_1},
+     {group, cluster_size_2},
+     {group, partition_handling}
     ].
 
 groups() ->
@@ -436,7 +437,7 @@ cluster_full_partition_test(Config) ->
     rabbit_ct_broker_helpers:block_traffic_between(B, C),
     timer:sleep(?DELAY),
 
-    ?assertEqual(3, count_connections_in(Config, VHost)),
+    ?assertEqual(2, count_connections_in(Config, VHost)),
 
     rabbit_ct_broker_helpers:allow_traffic_between(A, B),
     rabbit_ct_broker_helpers:allow_traffic_between(B, C),
