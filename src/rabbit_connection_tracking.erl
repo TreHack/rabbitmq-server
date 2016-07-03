@@ -26,12 +26,15 @@
 %%  * rabbit_event
 
 -export([register_connection/1, unregister_connection/1,
+         list/0, list/1, list_on_node/1,
          tracked_connection_from_connection_created/1,
-         is_over_connection_limit/1, count_connections_in/1]).
+         is_over_connection_limit/1, count_connections_in/1,
+         on_node_down/1]).
 
 -include_lib("rabbit.hrl").
 
--define(TABLE,  rabbit_tracked_connection).
+-define(TABLE, rabbit_tracked_connection).
+-define(PER_VHOST_COUNTER_TABLE, rabbit_tracked_connection_per_vhost).
 -define(SERVER, ?MODULE).
 
 %%
@@ -58,11 +61,48 @@ unregister_connection(ConnId = {_Node, _Name}) ->
                   []    -> ok;
                   [Row] ->
                       mnesia:dirty_update_counter(
-                        rabbit_tracked_connection_per_vhost,
+                        ?PER_VHOST_COUNTER_TABLE,
                         Row#tracked_connection.vhost, -1),
                       mnesia:delete({?TABLE, ConnId})
               end
       end).
+
+
+-spec list() -> [rabbit_types:tracked_connection()].
+
+list() ->
+  mnesia:dirty_match_object(?TABLE, #tracked_connection{_ = '_'}).
+
+
+-spec list(rabbit_types:vhost()) -> [rabbit_types:tracked_connection()].
+
+list(VHost) ->
+  mnesia:dirty_match_object(?TABLE, #tracked_connection{vhost = VHost, _ = '_'}).
+
+
+-spec list_on_node(node()) -> [rabbit_types:tracked_connection()].
+
+list_on_node(Node) ->
+  mnesia:dirty_match_object(?TABLE, #tracked_connection{node = Node, _ = '_'}).
+
+
+-spec on_node_down(node()) -> ok.
+
+on_node_down(Node) ->
+  case lists:member(Node, nodes()) of
+        false ->
+          Cs = list_on_node(Node),
+          rabbit_log:info(
+            "Node ~p is down, unregistering ~p connections to it~n",
+            [Node, length(Cs)]),
+          [unregister_connection(Id) || #tracked_connection{id = Id} <- Cs],
+          ok;
+        true  -> rabbit_log:info(
+                   "Keep ~s connections: the node is already back~n", [Node])
+    end.
+
+
+-spec is_over_connection_limit(rabbit_types:vhost()) -> boolean().
 
 is_over_connection_limit(VirtualHost) ->
     ConnectionCount = count_connections_in(VirtualHost),
@@ -77,12 +117,15 @@ is_over_connection_limit(VirtualHost) ->
                        end
     end.
 
+
+-spec count_connections_in(rabbit_types:vhost()) -> non_neg_integer().
+
 count_connections_in(VirtualHost) ->
     try
         case mnesia:transaction(
                fun() ->
                        case mnesia:dirty_read(
-                              {rabbit_tracked_connection_per_vhost,
+                              {?PER_VHOST_COUNTER_TABLE,
                                VirtualHost}) of
                            []    -> 0;
                            [Val] ->

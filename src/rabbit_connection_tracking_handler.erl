@@ -41,7 +41,7 @@
                                    [rabbit_event, ?MODULE, []]}},
                     {cleanup,     {gen_event, delete_handler,
                                    [rabbit_event, ?MODULE, []]}},
-                    {requires,    rabbit_event},
+                    {requires,    [rabbit_event, rabbit_node_monitor]},
                     {enables,     recovery}]}).
 
 
