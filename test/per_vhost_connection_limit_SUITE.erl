@@ -29,8 +29,7 @@
 all() ->
     [
      {group, cluster_size_1},
-     {group, cluster_size_2},
-     {group, partition_handling}
+     {group, cluster_size_2}
     ].
 
 groups() ->
@@ -47,10 +46,7 @@ groups() ->
           cluster_multiple_vhost_test,
           cluster_node_restart_test,
           cluster_node_list_on_node_test
-        ]},
-     {partition_handling, [], [
-          cluster_full_partition_test
-     ]}
+        ]}
     ].
 
 %% see partitions_SUITE
@@ -416,36 +412,6 @@ cluster_node_list_on_node_test(Config) ->
 
     timer:sleep(100),
     ?assertEqual(0, length(all_connections(Config, 0))),
-
-    passed.
-
-cluster_full_partition_test(Config) ->
-    VHost = <<"/">>,
-    rabbit_ct_broker_helpers:set_partition_handling_mode_globally(Config, autoheal),
-
-    ?assertEqual(0, count_connections_in(Config, VHost)),
-    [A, B, C] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
-
-    %% 3 connections, 1 per node
-    Conn1 = open_unmanaged_connection(Config, 0),
-    Conn2 = open_unmanaged_connection(Config, 1),
-    Conn3 = open_unmanaged_connection(Config, 2),
-    ?assertEqual(3, count_connections_in(Config, VHost)),
-
-    %% B drops off the network, non-reachable by either A or C
-    rabbit_ct_broker_helpers:block_traffic_between(A, B),
-    rabbit_ct_broker_helpers:block_traffic_between(B, C),
-    timer:sleep(?DELAY),
-
-    ?assertEqual(2, count_connections_in(Config, VHost)),
-
-    rabbit_ct_broker_helpers:allow_traffic_between(A, B),
-    rabbit_ct_broker_helpers:allow_traffic_between(B, C),
-    ?assertEqual(3, count_connections_in(Config, VHost)),
-
-    lists:foreach(fun (Conn) ->
-                          (catch amqp_connection:close(Conn))
-                  end, [Conn1, Conn2, Conn3]),
 
     passed.
 
