@@ -93,12 +93,12 @@ on_node_down(Node) ->
         false ->
           Cs = list_on_node(Node),
           rabbit_log:info(
-            "Node ~p is down, unregistering ~p connections to it~n",
+            "Node ~p is down, unregistering ~p client connections~n",
             [Node, length(Cs)]),
           [unregister_connection(Id) || #tracked_connection{id = Id} <- Cs],
           ok;
         true  -> rabbit_log:info(
-                   "Keep ~s connections: the node is already back~n", [Node])
+                   "Keeping ~s connections: the node is already back~n", [Node])
     end.
 
 
