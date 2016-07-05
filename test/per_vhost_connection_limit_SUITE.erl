@@ -112,7 +112,7 @@ most_basic_single_node_test(Config) ->
     ?assertEqual(0, count_connections_in(Config, VHost)),
     Conn = open_unmanaged_connection(Config, 0),
     ?assertEqual(1, count_connections_in(Config, VHost)),
-    amqp_connection:close(Conn),
+    rabbit_ct_client_helpers:close_connection(Conn),
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
     passed.
@@ -123,7 +123,7 @@ single_node_single_vhost_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0),
     ?assertEqual(1, count_connections_in(Config, VHost)),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
     Conn2 = open_unmanaged_connection(Config, 0),
@@ -142,7 +142,7 @@ single_node_single_vhost_test(Config) ->
     ?assertEqual(3, count_connections_in(Config, VHost)),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn2, Conn3, Conn5]),
 
     ?assertEqual(0, count_connections_in(Config, VHost)),
@@ -164,7 +164,7 @@ single_node_multiple_vhost_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0, VHost1),
     ?assertEqual(1, count_connections_in(Config, VHost1)),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, count_connections_in(Config, VHost1)),
 
     Conn2 = open_unmanaged_connection(Config, 0, VHost2),
@@ -187,7 +187,7 @@ single_node_multiple_vhost_test(Config) ->
     ?assertEqual(3, count_connections_in(Config, VHost2)),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn2, Conn3, Conn5, Conn6]),
 
     ?assertEqual(0, count_connections_in(Config, VHost1)),
@@ -213,7 +213,7 @@ single_node_list_in_vhost_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0, VHost1),
     [#tracked_connection{vhost = VHost1}] = connections_in(Config, VHost1),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, length(connections_in(Config, VHost1))),
 
     Conn2 = open_unmanaged_connection(Config, 0, VHost2),
@@ -233,7 +233,7 @@ single_node_list_in_vhost_test(Config) ->
                      all_connections(Config))),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn2, Conn3, Conn5, Conn6]),
 
     ?assertEqual(0, length(all_connections(Config))),
@@ -256,7 +256,7 @@ most_basic_cluster_test(Config) ->
     ?assertEqual(3, count_connections_in(Config, VHost)),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn1, Conn2, Conn3]),
 
     ?assertEqual(0, count_connections_in(Config, VHost)),
@@ -269,7 +269,7 @@ cluster_single_vhost_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0),
     ?assertEqual(1, count_connections_in(Config, VHost)),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
     Conn2 = open_unmanaged_connection(Config, 1),
@@ -288,7 +288,7 @@ cluster_single_vhost_test(Config) ->
     ?assertEqual(3, count_connections_in(Config, VHost)),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn2, Conn3, Conn5]),
 
     ?assertEqual(0, count_connections_in(Config, VHost)),
@@ -310,7 +310,7 @@ cluster_multiple_vhost_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0, VHost1),
     ?assertEqual(1, count_connections_in(Config, VHost1)),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, count_connections_in(Config, VHost1)),
 
     Conn2 = open_unmanaged_connection(Config, 1, VHost2),
@@ -333,7 +333,7 @@ cluster_multiple_vhost_test(Config) ->
     ?assertEqual(3, count_connections_in(Config, VHost2)),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn2, Conn3, Conn5, Conn6]),
 
     ?assertEqual(0, count_connections_in(Config, VHost1)),
@@ -350,7 +350,7 @@ cluster_node_restart_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0),
     ?assertEqual(1, count_connections_in(Config, VHost)),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
     Conn2 = open_unmanaged_connection(Config, 1),
@@ -369,7 +369,7 @@ cluster_node_restart_test(Config) ->
     ?assertEqual(1, count_connections_in(Config, VHost)),
 
     lists:foreach(fun (C) ->
-                          (catch amqp_connection:close(C))
+                          (catch rabbit_ct_client_helpers:close_connection(C))
                   end, [Conn2, Conn3, Conn4, Conn5]),
 
     ?assertEqual(0, count_connections_in(Config, VHost)),
@@ -384,7 +384,7 @@ cluster_node_list_on_node_test(Config) ->
 
     Conn1 = open_unmanaged_connection(Config, 0),
     [#tracked_connection{node = A}] = connections_on_node(Config, 0),
-    amqp_connection:close(Conn1),
+    rabbit_ct_client_helpers:close_connection(Conn1),
     ?assertEqual(0, length(connections_on_node(Config, 0))),
 
     _Conn2 = open_unmanaged_connection(Config, 1),
@@ -407,7 +407,7 @@ cluster_node_list_on_node_test(Config) ->
     ?assertEqual(0, length(connections_on_node(Config, 0, B))),
 
     lists:foreach(fun (C) ->
-                          amqp_connection:close(C)
+                          rabbit_ct_client_helpers:close_connection(C)
                   end, [Conn3, Conn5]),
 
     timer:sleep(100),
