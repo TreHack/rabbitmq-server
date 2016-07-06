@@ -28,12 +28,12 @@
 
 all() ->
     [
-     {group, partition_handling}
+     {group, net_ticktime_1}
     ].
 
 groups() ->
     [
-     {partition_handling, [], [
+     {net_ticktime_1, [], [
           cluster_full_partition_test
      ]}
     ].
@@ -54,23 +54,25 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     rabbit_ct_helpers:run_teardown_steps(Config).
 
-init_per_group(partition_handling, Config) ->
+init_per_group(net_ticktime_1 = GroupName, Config) ->
     Config1 = rabbit_ct_helpers:set_config(Config, [{net_ticktime, 1}]),
-    init_per_multinode_group(partition_handling, Config1, 3).
+    init_per_multinode_group(GroupName, Config1, 3).
 
 init_per_multinode_group(_GroupName, Config, NodeCount) ->
     Suffix = rabbit_ct_helpers:testcase_absname(Config, "", "-"),
     Config1 = rabbit_ct_helpers:set_config(Config, [
                                                     {rmq_nodes_count, NodeCount},
-                                                    {rmq_nodename_suffix, Suffix}
+                                                    {rmq_nodename_suffix, Suffix},
+                                                    {rmq_nodes_clustered, false}
       ]),
     rabbit_ct_helpers:run_steps(Config1,
-      rabbit_ct_broker_helpers:setup_steps() ++
-      rabbit_ct_client_helpers:setup_steps()).
+      rabbit_ct_broker_helpers:setup_steps() ++ [
+        fun rabbit_ct_broker_helpers:enable_dist_proxy/1,
+        fun rabbit_ct_broker_helpers:cluster_nodes/1
+      ]).
 
 end_per_group(_Group, Config) ->
     rabbit_ct_helpers:run_steps(Config,
-      rabbit_ct_client_helpers:teardown_steps() ++
       rabbit_ct_broker_helpers:teardown_steps()).
 
 init_per_testcase(Testcase, Config) ->
@@ -92,25 +94,31 @@ cluster_full_partition_test(Config) ->
     ?assertEqual(0, count_connections_in(Config, VHost)),
     [A, B, C] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
 
-    %% 3 connections, 1 per node
-    Conn1 = open_unmanaged_connection(Config, 0),
-    Conn2 = open_unmanaged_connection(Config, 1),
-    Conn3 = open_unmanaged_connection(Config, 2),
-    ?assertEqual(3, count_connections_in(Config, VHost)),
+    %% 6 connections, 2 per node
+    Conn1 = open_unmanaged_connection(Config, A),
+    Conn2 = open_unmanaged_connection(Config, A),
+    Conn3 = open_unmanaged_connection(Config, B),
+    Conn4 = open_unmanaged_connection(Config, B),
+    Conn5 = open_unmanaged_connection(Config, C),
+    Conn6 = open_unmanaged_connection(Config, C),
+    ?assertEqual(6, count_connections_in(Config, VHost)),
 
     %% B drops off the network, non-reachable by either A or C
     rabbit_ct_broker_helpers:block_traffic_between(A, B),
     rabbit_ct_broker_helpers:block_traffic_between(B, C),
     timer:sleep(?DELAY),
 
-    ?assertEqual(2, count_connections_in(Config, VHost)),
+    %% A and C are still connected, so 4 connections are tracked
+    ?assertEqual(4, count_connections_in(Config, VHost)),
 
     rabbit_ct_broker_helpers:allow_traffic_between(A, B),
     rabbit_ct_broker_helpers:allow_traffic_between(B, C),
-    ?assertEqual(3, count_connections_in(Config, VHost)),
+    timer:sleep(?DELAY),
+
+    ?assertEqual(6, count_connections_in(Config, VHost)),
 
     lists:foreach(fun (Conn) ->
-                          (catch amqp_connection:close(Conn))
+                          (catch rabbit_ct_client_helpers:close_connection(Conn))
                   end, [Conn1, Conn2, Conn3]),
 
     passed.

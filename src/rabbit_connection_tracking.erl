@@ -28,6 +28,7 @@
 -export([register_connection/1, unregister_connection/1,
          list/0, list/1, list_on_node/1,
          tracked_connection_from_connection_created/1,
+         tracked_connection_from_connection_state/1,
          is_over_connection_limit/1, count_connections_in/1,
          on_node_down/1]).
 
@@ -101,6 +102,9 @@ on_node_down(Node) ->
                    "Keeping ~s connections: the node is already back~n", [Node])
     end.
 
+-spec on_node_up(node()) -> ok.
+on_node_up(Node) ->
+  end.
 
 -spec is_over_connection_limit(rabbit_types:vhost()) -> boolean().
 
@@ -198,3 +202,21 @@ tracked_connection_from_connection_created(EventDetails) ->
                         pid          = proplists:get_value(pid, EventDetails),
                         peer_host    = proplists:get_value(peer_host, EventDetails),
                         peer_port    = proplists:get_value(peer_port, EventDetails)}.
+
+tracked_connection_from_connection_state(#connection{
+               vhost = VHost,
+               connected_at = Ts,
+               peer_host = PeerHost,
+               peer_port = PeerPort,
+               user = Username,
+               name = Name
+             }) ->
+  tracked_connection_from_connection_created(
+    [{name, Name},
+     {node, node()},
+     {vhost, VHost},
+     {user, Username},
+     {connected_at, Ts},
+     {pid, self()},
+     {peer_port, PeerPort},
+     {peer_host, PeerHost}]).

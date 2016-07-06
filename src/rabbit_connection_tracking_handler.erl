@@ -57,6 +57,12 @@ handle_event(#event{type = connection_created, props = Details}, State) ->
         rabbit_connection_tracking:tracked_connection_from_connection_created(Details)
     ),
     {ok, State};
+%% see rabbit_reader
+handle_event(#event{type = connection_reregistered, props = [{state, ConnState}]}, State) ->
+    rabbit_connection_tracking:register_connection(
+        rabbit_connection_tracking:tracked_connection_from_connection_state(ConnState)
+    ),
+    {ok, State};
 handle_event(#event{type = connection_closed, props = Details}, State) ->
     %% [{name,<<"127.0.0.1:64078 -> 127.0.0.1:5672">>},
     %%  {pid,<0.1774.0>},
