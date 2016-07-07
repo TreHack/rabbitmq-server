@@ -61,11 +61,11 @@
                                  confirmed           :: [rabbit_guid:guid()],
                                  known_senders       :: sets:set()
                                }.
-
 -spec promote_backing_queue_state
         (rabbit_amqqueue:name(), pid(), atom(), any(), pid(), [any()],
          dict:dict(), [pid()]) ->
             master_state().
+
 -spec sender_death_fun() -> death_fun().
 -spec depth_fun() -> depth_fun().
 -spec init_with_existing_bq(rabbit_types:amqqueue(), atom(), any()) ->
