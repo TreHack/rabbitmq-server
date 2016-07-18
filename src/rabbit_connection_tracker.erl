@@ -28,7 +28,7 @@
 -behaviour(gen_server2).
 
 %% API
--export([start_link/0, reregister/0]).
+-export([boot/0, start_link/0, reregister/0]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -44,6 +44,10 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+boot() ->
+  {ok, _} = start_link(),
+  ok.
 
 start_link() ->
   gen_server2:start_link({local, ?SERVER}, ?MODULE, [], []).
