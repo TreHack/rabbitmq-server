@@ -30,7 +30,7 @@
          tracked_connection_from_connection_created/1,
          tracked_connection_from_connection_state/1,
          is_over_connection_limit/1, count_connections_in/1,
-         on_node_down/1]).
+         on_node_down/1, on_node_up/1]).
 
 -include_lib("rabbit.hrl").
 
@@ -103,8 +103,9 @@ on_node_down(Node) ->
     end.
 
 -spec on_node_up(node()) -> ok.
-on_node_up(Node) ->
-  end.
+on_node_up(_Node) ->
+  %% TODO
+  ok.
 
 -spec is_over_connection_limit(rabbit_types:vhost()) -> boolean().
 
