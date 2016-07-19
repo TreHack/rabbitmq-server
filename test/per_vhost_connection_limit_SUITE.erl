@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2011-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2011-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(per_vhost_connection_limit_SUITE).
@@ -38,14 +38,16 @@ groups() ->
           most_basic_single_node_test,
           single_node_single_vhost_test,
           single_node_multiple_vhost_test,
-          single_node_list_in_vhost_test
+          single_node_list_in_vhost_test,
+          single_node_connection_reregistration_idempotency_test
         ]},
       {cluster_size_2, [], [
           most_basic_cluster_test,
           cluster_single_vhost_test,
           cluster_multiple_vhost_test,
           cluster_node_restart_test,
-          cluster_node_list_on_node_test
+          cluster_node_list_on_node_test,
+          cluster_connection_reregistration_idempotency_test
         ]}
     ].
 
@@ -413,8 +415,61 @@ cluster_node_list_on_node_test(Config) ->
     timer:sleep(100),
     ?assertEqual(0, length(all_connections(Config, 0))),
 
+    rabbit_ct_broker_helpers:start_broker(Config, 1),
+
     passed.
 
+single_node_connection_reregistration_idempotency_test(Config) ->
+    VHost = <<"/">>,
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn1 = open_unmanaged_connection(Config, 0),
+    Conn2 = open_unmanaged_connection(Config, 0),
+    Conn3 = open_unmanaged_connection(Config, 0),
+    Conn4 = open_unmanaged_connection(Config, 0),
+    Conn5 = open_unmanaged_connection(Config, 0),
+
+    ?assertEqual(5, count_connections_in(Config, VHost)),
+
+    reregister_connections_on(Config, 0),
+    timer:sleep(100),
+
+    ?assertEqual(5, count_connections_in(Config, VHost)),
+
+    lists:foreach(fun (C) ->
+                          rabbit_ct_client_helpers:close_connection(C)
+                  end, [Conn1, Conn2, Conn3, Conn4, Conn5]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    passed.
+
+cluster_connection_reregistration_idempotency_test(Config) ->
+    VHost = <<"/">>,
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn1 = open_unmanaged_connection(Config, 0),
+    Conn2 = open_unmanaged_connection(Config, 1),
+    Conn3 = open_unmanaged_connection(Config, 0),
+    Conn4 = open_unmanaged_connection(Config, 1),
+    Conn5 = open_unmanaged_connection(Config, 1),
+
+    ?assertEqual(5, count_connections_in(Config, VHost)),
+
+    reregister_connections_on(Config, 0),
+    reregister_connections_on(Config, 1),
+    timer:sleep(100),
+
+    ?assertEqual(5, count_connections_in(Config, VHost)),
+
+    lists:foreach(fun (C) ->
+                          rabbit_ct_client_helpers:close_connection(C)
+                  end, [Conn1, Conn2, Conn3, Conn4, Conn5]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    passed.
 
 %% -------------------------------------------------------------------
 %% Helpers
@@ -452,3 +507,11 @@ all_connections(Config, NodeIndex) ->
     rabbit_ct_broker_helpers:rpc(Config, NodeIndex,
                                  rabbit_connection_tracking,
                                  list, []).
+
+reregister_connections_on(Config, NodeIndex) ->
+    Node  = rabbit_ct_broker_helpers:get_node_config(
+              Config, NodeIndex, nodename),
+    rabbit_ct_broker_helpers:rpc(Config, NodeIndex,
+                                rabbit_connection_tracker,
+                                reregister,
+                                [Node]).
