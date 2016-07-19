@@ -34,12 +34,12 @@ all() ->
 groups() ->
     [
      {net_ticktime_1, [], [
-          cluster_full_partition_test
+          cluster_full_partition_with_autoheal_test
      ]}
     ].
 
 %% see partitions_SUITE
--define(DELAY, 9000).
+-define(DELAY, 12000).
 
 %% -------------------------------------------------------------------
 %% Testsuite setup/teardown.
@@ -87,7 +87,7 @@ end_per_testcase(Testcase, Config) ->
 %% Test cases.
 %% -------------------------------------------------------------------
 
-cluster_full_partition_test(Config) ->
+cluster_full_partition_with_autoheal_test(Config) ->
     VHost = <<"/">>,
     rabbit_ct_broker_helpers:set_partition_handling_mode_globally(Config, autoheal),
 
@@ -115,11 +115,13 @@ cluster_full_partition_test(Config) ->
     rabbit_ct_broker_helpers:allow_traffic_between(B, C),
     timer:sleep(?DELAY),
 
-    ?assertEqual(6, count_connections_in(Config, VHost)),
+    %% during autoheal B's connections were dropped
+    ?assertEqual(4, count_connections_in(Config, VHost)),
 
     lists:foreach(fun (Conn) ->
                           (catch rabbit_ct_client_helpers:close_connection(Conn))
-                  end, [Conn1, Conn2, Conn3]),
+                  end, [Conn1, Conn2, Conn3, Conn4,
+                        Conn5, Conn6]),
 
     passed.
 

@@ -28,7 +28,7 @@
 -behaviour(gen_server2).
 
 %% API
--export([boot/0, start_link/0, reregister/0]).
+-export([boot/0, start_link/0, reregister/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -52,8 +52,9 @@ boot() ->
 start_link() ->
   gen_server2:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-reregister() ->
-  gen_server2:cast({local, ?SERVER}, reregister).
+reregister(Node) ->
+  rabbit_log:info("Telling node ~p to re-register tracked connections", [Node]),
+  gen_server2:cast({?SERVER, Node}, reregister).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -66,8 +67,9 @@ handle_call(_Req, _From, State) ->
   {noreply, State}.
 
 handle_cast(reregister, State) ->
-  rabbit_log:info("Connection tracker: asked to re-register client connections"),
-  case rabbit_networking:connections_local() of
+  Cs = rabbit_networking:connections_local(),
+  rabbit_log:info("Connection tracker: asked to re-register ~p client connections", [length(Cs)]),
+  case Cs of
     [] -> ok;
     Cs ->
       [reregister_connection(C) || C <- Cs],
@@ -90,4 +92,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 reregister_connection(Conn) ->
-  Conn ! reregister.
+  try
+    Conn ! reregister
+  catch _:Error ->
+    rabbit_log:error("Failed to re-register connection ~p after a network split: ~p", [Conn, Error])
+  end.

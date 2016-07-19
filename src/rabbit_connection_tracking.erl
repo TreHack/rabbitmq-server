@@ -44,12 +44,18 @@
 
 -spec register_connection(rabbit_types:tracked_connection()) -> ok.
 
-register_connection(#tracked_connection{vhost = VHost} = Conn) ->
+register_connection(#tracked_connection{vhost = VHost, id = ConnId} = Conn) ->
     rabbit_misc:execute_mnesia_transaction(
       fun() ->
-              mnesia:write(?TABLE, Conn, write),
-              mnesia:dirty_update_counter(
-                rabbit_tracked_connection_per_vhost, VHost, 1),
+        %% upsert
+              case mnesia:dirty_read(?TABLE, ConnId) of
+                  []    ->
+                    mnesia:write(?TABLE, Conn, write),
+                    mnesia:dirty_update_counter(
+                      rabbit_tracked_connection_per_vhost, VHost, 1);
+                  [_Row] ->
+                      ok
+              end,
               ok
       end).
 
@@ -103,8 +109,8 @@ on_node_down(Node) ->
     end.
 
 -spec on_node_up(node()) -> ok.
-on_node_up(_Node) ->
-  %% TODO
+on_node_up(Node) ->
+  rabbit_connection_tracker:reregister(Node),
   ok.
 
 -spec is_over_connection_limit(rabbit_types:vhost()) -> boolean().
