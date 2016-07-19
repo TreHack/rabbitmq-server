@@ -35,17 +35,17 @@ all() ->
 groups() ->
     [
       {cluster_size_1, [], [
-          most_basic_single_node_test,
-          single_node_single_vhost_test,
-          single_node_multiple_vhost_test,
+          most_basic_single_node_connection_count_test,
+          single_node_single_vhost_connection_count_test,
+          single_node_multiple_vhost_connection_count_test,
           single_node_list_in_vhost_test,
           single_node_connection_reregistration_idempotency_test
         ]},
       {cluster_size_2, [], [
-          most_basic_cluster_test,
-          cluster_single_vhost_test,
-          cluster_multiple_vhost_test,
-          cluster_node_restart_test,
+          most_basic_cluster_connection_count_test,
+          cluster_single_vhost_connection_count_test,
+          cluster_multiple_vhost_connection_count_test,
+          cluster_node_restart_connection_count_test,
           cluster_node_list_on_node_test,
           cluster_connection_reregistration_idempotency_test
         ]}
@@ -109,7 +109,7 @@ end_per_testcase(Testcase, Config) ->
 %% Test cases.
 %% -------------------------------------------------------------------
 
-most_basic_single_node_test(Config) ->
+most_basic_single_node_connection_count_test(Config) ->
     VHost = <<"/">>,
     ?assertEqual(0, count_connections_in(Config, VHost)),
     Conn = open_unmanaged_connection(Config, 0),
@@ -119,7 +119,7 @@ most_basic_single_node_test(Config) ->
 
     passed.
 
-single_node_single_vhost_test(Config) ->
+single_node_single_vhost_connection_count_test(Config) ->
     VHost = <<"/">>,
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
@@ -151,7 +151,7 @@ single_node_single_vhost_test(Config) ->
 
     passed.
 
-single_node_multiple_vhost_test(Config) ->
+single_node_multiple_vhost_connection_count_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
@@ -245,7 +245,7 @@ single_node_list_in_vhost_test(Config) ->
 
     passed.
 
-most_basic_cluster_test(Config) ->
+most_basic_cluster_connection_count_test(Config) ->
     VHost = <<"/">>,
     ?assertEqual(0, count_connections_in(Config, VHost)),
     Conn1 = open_unmanaged_connection(Config, 0),
@@ -265,7 +265,7 @@ most_basic_cluster_test(Config) ->
 
     passed.
 
-cluster_single_vhost_test(Config) ->
+cluster_single_vhost_connection_count_test(Config) ->
     VHost = <<"/">>,
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
@@ -297,7 +297,7 @@ cluster_single_vhost_test(Config) ->
 
     passed.
 
-cluster_multiple_vhost_test(Config) ->
+cluster_multiple_vhost_connection_count_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
@@ -346,7 +346,7 @@ cluster_multiple_vhost_test(Config) ->
 
     passed.
 
-cluster_node_restart_test(Config) ->
+cluster_node_restart_connection_count_test(Config) ->
     VHost = <<"/">>,
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
