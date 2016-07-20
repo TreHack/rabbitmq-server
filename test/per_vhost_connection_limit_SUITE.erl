@@ -41,7 +41,8 @@ groups() ->
           single_node_list_in_vhost_test,
           single_node_connection_reregistration_idempotency_test,
           single_node_single_vhost_limit_test,
-          single_node_multiple_vhost_limit_test
+          single_node_multiple_vhost_limit_test,
+          single_node_vhost_deletion_forces_connection_closure_test
         ]},
       {cluster_size_2, [], [
           most_basic_cluster_connection_count_test,
@@ -498,7 +499,7 @@ single_node_single_vhost_limit_test(Config) ->
                   end, [Conn1, Conn2, Conn3, Conn4, Conn5]),
 
     ?assertEqual(0, count_connections_in(Config, VHost)),
-    set_vhost_connection_limit(Config, VHost, 100000000),
+    set_vhost_connection_limit(Config, VHost, 0),
 
     passed.
 
@@ -577,7 +578,37 @@ cluster_single_vhost_limit_test(Config) ->
 
     ?assertEqual(0, count_connections_in(Config, VHost)),
 
-    set_vhost_connection_limit(Config, VHost, 100000000),
+    set_vhost_connection_limit(Config, VHost, 0),
+
+    passed.
+
+single_node_vhost_deletion_forces_connection_closure_test(Config) ->
+    VHost1 = <<"vhost1">>,
+    VHost2 = <<"vhost2">>,
+
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
+
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+    ?assertEqual(0, count_connections_in(Config, VHost2)),
+
+    Conn1 = open_unmanaged_connection(Config, 0, VHost1),
+    ?assertEqual(1, count_connections_in(Config, VHost1)),
+
+    _Conn2 = open_unmanaged_connection(Config, 0, VHost2),
+    ?assertEqual(1, count_connections_in(Config, VHost2)),
+
+    rabbit_ct_broker_helpers:delete_vhost(Config, VHost2),
+    timer:sleep(200),
+    ?assertEqual(0, count_connections_in(Config, VHost2)),
+
+    rabbit_ct_client_helpers:close_connection(Conn1),
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+
+    rabbit_ct_broker_helpers:delete_vhost(Config, VHost1),
 
     passed.
 

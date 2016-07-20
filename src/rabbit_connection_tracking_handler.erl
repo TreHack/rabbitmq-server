@@ -72,10 +72,14 @@ handle_event(#event{type = connection_closed, props = Details}, State) ->
          proplists:get_value(name, Details)}),
     {ok, State};
 handle_event(#event{type = vhost_deleted, props = Details}, State) ->
-    _VHost = proplists:get_value(name, Details),
-    %% TODO: force close and unregister connections in
-    %%       this vhost. Moved to rabbitmq/rabbitmq-server#627.
-    {ok, State};
+    VHost = proplists:get_value(name, Details),
+    rabbit_log_connection:info("Closing all connections in vhost '~s' because it's being deleted", [VHost]),
+    case rabbit_connection_tracking:list(VHost) of
+      [] -> {ok, State};
+      Cs ->
+        [rabbit_networking:close_connection(Pid, rabbit_misc:format("vhost '~s' is deleted", [VHost])) || #tracked_connection{pid = Pid} <- Cs],
+        {ok, State}
+    end;
 handle_event(#event{type = user_deleted, props = Details}, State) ->
     _Username = proplists:get_value(name, Details),
     %% TODO: force close and unregister connections from
