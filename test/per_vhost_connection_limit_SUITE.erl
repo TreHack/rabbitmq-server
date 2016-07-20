@@ -39,7 +39,9 @@ groups() ->
           single_node_single_vhost_connection_count_test,
           single_node_multiple_vhost_connection_count_test,
           single_node_list_in_vhost_test,
-          single_node_connection_reregistration_idempotency_test
+          single_node_connection_reregistration_idempotency_test,
+          single_node_single_vhost_limit_test,
+          single_node_multiple_vhost_limit_test
         ]},
       {cluster_size_2, [], [
           most_basic_cluster_connection_count_test,
@@ -47,7 +49,8 @@ groups() ->
           cluster_multiple_vhost_connection_count_test,
           cluster_node_restart_connection_count_test,
           cluster_node_list_on_node_test,
-          cluster_connection_reregistration_idempotency_test
+          cluster_connection_reregistration_idempotency_test,
+          cluster_single_vhost_limit_test
         ]}
     ].
 
@@ -471,6 +474,114 @@ cluster_connection_reregistration_idempotency_test(Config) ->
 
     passed.
 
+single_node_single_vhost_limit_test(Config) ->
+    VHost = <<"/">>,
+    set_vhost_connection_limit(Config, VHost, 3),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn1 = open_unmanaged_connection(Config, 0),
+    Conn2 = open_unmanaged_connection(Config, 0),
+    Conn3 = open_unmanaged_connection(Config, 0),
+
+    %% we've crossed the limit
+    {error, not_allowed} = open_unmanaged_connection(Config, 0),
+    {error, not_allowed} = open_unmanaged_connection(Config, 0),
+    {error, not_allowed} = open_unmanaged_connection(Config, 0),
+
+    set_vhost_connection_limit(Config, VHost, 5),
+    Conn4 = open_unmanaged_connection(Config, 0),
+    Conn5 = open_unmanaged_connection(Config, 0),
+
+    lists:foreach(fun (C) ->
+                          rabbit_ct_client_helpers:close_connection(C)
+                  end, [Conn1, Conn2, Conn3, Conn4, Conn5]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+    set_vhost_connection_limit(Config, VHost, 100000000),
+
+    passed.
+
+single_node_multiple_vhost_limit_test(Config) ->
+    VHost1 = <<"vhost1">>,
+    VHost2 = <<"vhost2">>,
+
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
+    set_vhost_connection_limit(Config, VHost1, 2),
+
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+    set_vhost_connection_limit(Config, VHost2, 2),
+
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+    ?assertEqual(0, count_connections_in(Config, VHost2)),
+
+    Conn1 = open_unmanaged_connection(Config, 0, VHost1),
+    Conn2 = open_unmanaged_connection(Config, 0, VHost1),
+    Conn3 = open_unmanaged_connection(Config, 0, VHost2),
+    Conn4 = open_unmanaged_connection(Config, 0, VHost2),
+
+    %% we've crossed the limit
+    {error, not_allowed} = open_unmanaged_connection(Config, 0, VHost1),
+    {error, not_allowed} = open_unmanaged_connection(Config, 0, VHost2),
+
+    Conn5 = open_unmanaged_connection(Config, 0),
+
+    set_vhost_connection_limit(Config, VHost1, 5),
+    set_vhost_connection_limit(Config, VHost2, 5),
+
+    Conn6 = open_unmanaged_connection(Config, 0, VHost1),
+    Conn7 = open_unmanaged_connection(Config, 0, VHost1),
+    Conn8 = open_unmanaged_connection(Config, 0, VHost1),
+    Conn9 = open_unmanaged_connection(Config, 0, VHost2),
+    Conn10 = open_unmanaged_connection(Config, 0, VHost2),
+
+    lists:foreach(fun (C) ->
+                          rabbit_ct_client_helpers:close_connection(C)
+                  end, [Conn1, Conn2, Conn3, Conn4, Conn5,
+                        Conn6, Conn7, Conn8, Conn9, Conn10]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost1)),
+    ?assertEqual(0, count_connections_in(Config, VHost2)),
+
+    set_vhost_connection_limit(Config, VHost1, 100000000),
+    set_vhost_connection_limit(Config, VHost2, 100000000),
+
+    rabbit_ct_broker_helpers:delete_vhost(Config, VHost1),
+    rabbit_ct_broker_helpers:delete_vhost(Config, VHost2),
+
+    passed.
+
+cluster_single_vhost_limit_test(Config) ->
+    VHost = <<"/">>,
+    set_vhost_connection_limit(Config, VHost, 2),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    Conn1 = open_unmanaged_connection(Config, 0, VHost),
+    Conn2 = open_unmanaged_connection(Config, 1, VHost),
+
+    %% we've crossed the limit
+    {error, not_allowed} = open_unmanaged_connection(Config, 0, VHost),
+    {error, not_allowed} = open_unmanaged_connection(Config, 1, VHost),
+
+    set_vhost_connection_limit(Config, VHost, 5),
+
+    Conn3 = open_unmanaged_connection(Config, 0, VHost),
+    Conn4 = open_unmanaged_connection(Config, 0, VHost),
+
+    lists:foreach(fun (C) ->
+                          rabbit_ct_client_helpers:close_connection(C)
+                  end, [Conn1, Conn2, Conn3, Conn4]),
+
+    ?assertEqual(0, count_connections_in(Config, VHost)),
+
+    set_vhost_connection_limit(Config, VHost, 100000000),
+
+    passed.
+
+
 %% -------------------------------------------------------------------
 %% Helpers
 %% -------------------------------------------------------------------
@@ -515,3 +626,14 @@ reregister_connections_on(Config, NodeIndex) ->
                                 rabbit_connection_tracker,
                                 reregister,
                                 [Node]).
+
+set_vhost_connection_limit(Config, VHost, Count) ->
+    set_vhost_connection_limit(Config, 0, VHost, Count).
+
+set_vhost_connection_limit(Config, NodeIndex, VHost, Count) ->
+    Node  = rabbit_ct_broker_helpers:get_node_config(
+              Config, NodeIndex, nodename),
+    rabbit_ct_broker_helpers:control_action(
+      set_vhost_limits, Node,
+      ["{\"max-connections\": " ++ integer_to_list(Count) ++ "}"],
+      [{"-p", binary_to_list(VHost)}]).
