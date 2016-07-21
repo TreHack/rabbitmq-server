@@ -159,11 +159,8 @@ single_node_multiple_vhost_connection_count_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
-
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+    set_up_vhost(Config, VHost1),
+    set_up_vhost(Config, VHost2),
 
     ?assertEqual(0, count_connections_in(Config, VHost1)),
     ?assertEqual(0, count_connections_in(Config, VHost2)),
@@ -208,11 +205,8 @@ single_node_list_in_vhost_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
-
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+    set_up_vhost(Config, VHost1),
+    set_up_vhost(Config, VHost2),
 
     ?assertEqual(0, length(connections_in(Config, VHost1))),
     ?assertEqual(0, length(connections_in(Config, VHost2))),
@@ -305,11 +299,8 @@ cluster_multiple_vhost_connection_count_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
-
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+    set_up_vhost(Config, VHost1),
+    set_up_vhost(Config, VHost2),
 
     ?assertEqual(0, count_connections_in(Config, VHost1)),
     ?assertEqual(0, count_connections_in(Config, VHost2)),
@@ -507,12 +498,10 @@ single_node_multiple_vhost_limit_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
-    set_vhost_connection_limit(Config, VHost1, 2),
+    set_up_vhost(Config, VHost1),
+    set_up_vhost(Config, VHost2),
 
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+    set_vhost_connection_limit(Config, VHost1, 2),
     set_vhost_connection_limit(Config, VHost2, 2),
 
     ?assertEqual(0, count_connections_in(Config, VHost1)),
@@ -586,11 +575,8 @@ single_node_vhost_deletion_forces_connection_closure_test(Config) ->
     VHost1 = <<"vhost1">>,
     VHost2 = <<"vhost2">>,
 
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost1),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost1),
-
-    rabbit_ct_broker_helpers:add_vhost(Config, VHost2),
-    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost2),
+    set_up_vhost(Config, VHost1),
+    set_up_vhost(Config, VHost2),
 
     ?assertEqual(0, count_connections_in(Config, VHost1)),
     ?assertEqual(0, count_connections_in(Config, VHost2)),
@@ -657,6 +643,10 @@ reregister_connections_on(Config, NodeIndex) ->
                                 rabbit_connection_tracker,
                                 reregister,
                                 [Node]).
+
+set_up_vhost(Config, VHost) ->
+    rabbit_ct_broker_helpers:add_vhost(Config, VHost),
+    rabbit_ct_broker_helpers:set_full_permissions(Config, <<"guest">>, VHost).
 
 set_vhost_connection_limit(Config, VHost, Count) ->
     set_vhost_connection_limit(Config, 0, VHost, Count).
